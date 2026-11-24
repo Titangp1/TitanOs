@@ -56,6 +56,13 @@ static bool ok(const char *cmd);
 static void wifi_start(void) {
     if (ctrl >= 0 || plat_ms() < next_try) return;
     next_try = plat_ms() + 4000;
+    /* chiffrement du Wi-Fi : sans ces modules, la recherche marche mais aucune connexion WPA */
+    static bool crypto;
+    if (!crypto) {
+        crypto = true;
+        static const char *const m[] = { "ccm", "ctr", "gcm", "ghash_generic", "cmac", "seqiv", "michael_mic", "aesni_intel", "libarc4" };
+        for (int i = 0; i < countof(m); i++) module_load(m[i]);
+    }
     iface[0] = 0;
     for_each_dir("/sys/class/net", find_cb, NULL);
     if (!iface[0]) return;

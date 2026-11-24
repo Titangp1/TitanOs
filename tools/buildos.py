@@ -43,6 +43,8 @@ MODULES = [
     "asix", "virtio_net", "af_packet",
     # Wi-Fi du VAIO : Intel Centrino 6200 (iwldvm) ou Atheros AR9287 (ath9k)
     "iwlwifi", "iwldvm", "ath9k",
+    # chiffrement demandé par le Wi-Fi (WPA2 : CCMP/AES ; WPA3 et 802.11w : GCMP, CMAC ; ancien WPA : TKIP)
+    "ccm", "ctr", "gcm", "ghash_generic", "cmac", "seqiv", "michael_mic", "aesni_intel", "libarc4",
 ]
 
 # Programmes d'Alpine embarqués (avec leurs bibliothèques)
@@ -342,7 +344,7 @@ def build(repo, B):
 
     print("[image disque]")
     import mkimage
-    readme = ("TitanOs beta 9 - systeme d'exploitation sur base Linux\r\n\r\n"
+    readme = ("TitanOs beta 10 - systeme d'exploitation sur base Linux\r\n\r\n"
               "TITANOS\\VMLINUZ     noyau Linux\r\n"
               "TITANOS\\INITRD.IMG  systeme TitanOs (bureau, pilotes, BusyBox)\r\n"
               "EFI\\BOOT\\BOOTX64.EFI chargeur UEFI (Secure Boot desactive)\r\n"
@@ -358,6 +360,6 @@ def build(repo, B):
     write_update(out, info, s2, vmlinuz, initrd, bootimg.build(ttc))
     print(f"  noyau au secteur {info['kernel_lba']}, initramfs au secteur {info['initrd_lba']}, "
           f"chargé à {info['initrd_addr'] >> 20} Mo ; {info['free_mb']} Mo libres pour vos fichiers")
-    print(f"\nTitanOs bêta 9 est prêt :")
+    print(f"\nTitanOs bêta 10 est prêt :")
     print(f"  build/titanos.img   image pour clé USB ({DISK_MB} Mo, démarre en BIOS et en UEFI)")
     print(f"  build/titanos.vhd   disque virtuel (VirtualBox, Hyper-V génération 1)")
