@@ -5,7 +5,7 @@
 **Un système d'exploitation léger, sur base Linux, avec un bureau *liquid glass* écrit en C.**
 Pensé pour le Sony VAIO série F, il démarre sur n'importe quel PC 64 bits (BIOS ou UEFI).
 
-[**Télécharger la dernière version**](../../releases/latest) · [Historique des versions](CHANGELOG.md)
+[**Télécharger la dernière version**](../../releases/latest) · [Historique des versions](CHANGELOG.md) · [Contribuer](CONTRIBUTING.md) · Licence GPL-3.0
 
 ![Bureau de TitanOs](docs/captures/bureau.png)
 
@@ -207,6 +207,15 @@ tools/                téléchargement Alpine, polices, initramfs, image disque,
 | les sons | `src/core/sound.c` (chaque son est une petite partition de notes) |
 | ajouter un pilote ou un programme d'Alpine | `MODULES` et `PACKAGES` dans `tools/buildos.py` |
 | les commandes du Terminal | `rootfs/etc/profile` |
+
+## Licence
+
+TitanOs est © 2026 **Titangp1**. Il est distribué sous la licence libre **GNU GPL version 3 ou ultérieure** : voir [LICENSE](LICENSE) et [NOTICE](NOTICE).
+
+- Le projet et son code restent la propriété de leur auteur, et chaque copie doit le créditer.
+- Tout le monde peut lire le code, l'utiliser et proposer des améliorations ([CONTRIBUTING.md](CONTRIBUTING.md)).
+- Une version modifiée doit rester libre, sous la même licence, avec son code source. Personne ne peut en faire un logiciel fermé.
+- Le nom TitanOs et son logo désignent la version officielle.
 
 ## Licences des composants embarqués
 

@@ -2,6 +2,11 @@
 
 Toutes les versions sont dans les [versions publiées](../../releases). Depuis la bêta 6, TitanOs se met à jour tout seul.
 
+## Bêta 19
+
+- TitanOs est maintenant distribué sous la licence **GNU GPL version 3** (voir LICENSE, NOTICE et CONTRIBUTING.md).
+- Une fois TitanOs installé sur le disque, Système et Fichiers indiquent « Disque interne (modèle du disque) » au lieu de « Clé USB TITANOS ».
+
 ## Bêta 18
 
 **Bureau**

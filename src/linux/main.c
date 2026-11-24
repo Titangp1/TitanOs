@@ -301,6 +301,22 @@ static void start_journal(void) {
     spawn_quiet(argv);
 }
 
+/* où TitanOs a démarré, en mots : clé USB ou disque interne (avec son modèle) */
+static void storage_label(char *out, int n) {
+    char disk[32], p[96], v[64], link[256];
+    strlcpy(out, "Clé USB TITANOS", (size_t)n);
+    if (!key_dev[0] || !disk_of(key_dev, disk, sizeof disk)) return;
+    snprintf(p, sizeof p, "/sys/block/%s/removable", disk);
+    bool usb = read_file(p, v, sizeof v) > 0 && v[0] == '1';
+    snprintf(p, sizeof p, "/sys/block/%s", disk);
+    long r = sys_readlink(p, link, sizeof link - 1);
+    if (r > 0) { link[r] = 0; if (strstr(link, "/usb")) usb = true; }
+    if (usb) return;
+    snprintf(p, sizeof p, "/sys/block/%s/device/model", disk);
+    if (read_file(p, v, sizeof v) > 0 && trim(v)[0]) snprintf(out, (size_t)n, "Disque interne (%s)", trim(v));
+    else strlcpy(out, "Disque interne", (size_t)n);
+}
+
 static void boot_worker(int out) {
     boot_out = out;
     say("Démarrage du noyau Linux…");
@@ -327,7 +343,9 @@ static void boot_worker(int out) {
         say("Ouverture de vos fichiers…");
         bool apps = setup_apps(say);
         char m[160];
-        snprintf(m, sizeof m, "K%s\n", apps ? "Clé USB TITANOS (+ applications)" : "Clé USB TITANOS");
+        char where[96];
+        storage_label(where, sizeof where);
+        snprintf(m, sizeof m, "K%s%s\n", where, apps ? " · avec les applications" : "");
         tell(m);
     }
     say("Ouverture de la session…");
@@ -367,7 +385,7 @@ static void prepare_home(bool on_key, const char *storage) {
     if (first) {
         char p[256];
         snprintf(p, sizeof p, "%s/Bienvenue.txt", home);
-        const char *t = "Bienvenue dans TitanOs (bêta 18) !\n\n"
+        const char *t = "Bienvenue dans TitanOs (bêta 19) !\n\n"
                         "TitanOs tourne sur le noyau Linux : Linux fournit les pilotes (écran, clavier,\n"
                         "USB, Wi-Fi, son...), et tout le reste est écrit pour TitanOs.\n\n"
                         "Vos fichiers sont gardés sur la clé USB, dans le dossier Utilisateur.\n"

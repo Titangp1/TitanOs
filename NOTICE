@@ -1,0 +1,14 @@
+TitanOs
+Copyright (C) 2026 Titangp1 - https://github.com/Titangp1/TitanOs
+
+Ce programme est un logiciel libre : vous pouvez le redistribuer et le modifier selon les
+termes de la GNU General Public License publiée par la Free Software Foundation, version 3
+ou (à votre choix) toute version ultérieure.
+
+Il est distribué dans l'espoir qu'il sera utile, mais SANS AUCUNE GARANTIE, sans même la
+garantie implicite de qualité marchande ou d'adéquation à un usage particulier. Voir le
+fichier LICENSE (texte officiel de la GNU GPL version 3) pour plus de détails.
+
+Les composants embarqués gardent leur propre licence : noyau Linux et BusyBox (GPL),
+wpa_supplicant (BSD), curl (licence curl), police Inter (SIL OFL 1.1), micrologiciel Intel
+(licence de redistribution d'Intel, linux-firmware).

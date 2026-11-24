@@ -46,7 +46,8 @@ static void about_draw(window_t *w, canvas_t *c) {
     text_draw(c, &font_body, p.x + 18, p.y + 62, "en C et sans bibliothèque. Linux ne fournit que les pilotes.", C_TEXT2);
     snprintf(buf, sizeof buf, "Utilisateur : %s", g_set.user);
     text_draw(c, &font_body, p.x + 18, p.y + 92, buf, C_MUTED);
-    text_center(c, &font_small, R(0, c->h - 40, c->w, 18), "Noyau Linux et BusyBox : GPL · Police Inter : SIL OFL", C_MUTED);
+    text_center(c, &font_small, R(0, c->h - 58, c->w, 18), "© 2026 Titangp1 · logiciel libre, licence GNU GPL v3", C_TEXT2);
+    text_center(c, &font_small, R(0, c->h - 38, c->w, 18), "Noyau Linux et BusyBox : GPL · Police Inter : SIL OFL", C_MUTED);
 }
 
 void app_about_open(void) {
