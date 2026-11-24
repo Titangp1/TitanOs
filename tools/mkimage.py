@@ -182,7 +182,7 @@ def zero_page(kernel, initrd_addr, initrd_size, cmdline_addr):
     return zp
 
 
-def build_disk(disk_mb, efi, mbr_code, stage2, kernel, initrd, cmdline, readme, bootimg):
+def build_disk(disk_mb, efi, mbr_code, stage2, kernel, initrd, cmdline, readme, bootimg, version=b""):
     total = disk_mb * 1024 * 1024 // SECTOR
     part_sectors = total - PART_START
     if len(mbr_code) > 440:
@@ -204,7 +204,9 @@ def build_disk(disk_mb, efi, mbr_code, stage2, kernel, initrd, cmdline, readme, 
         "EFI": {"BOOT": {"BOOTX64.EFI": pad("EFI/BOOT/BOOTX64.EFI", efi)}},
         "TITANOS": {"VMLINUZ": pad("TITANOS/VMLINUZ", kernel), "INITRD.IMG": pad("TITANOS/INITRD.IMG", initrd),
                     "BOOT.IMG": pad("TITANOS/BOOT.IMG", bootimg),
-                    "TAILLES": pad("TITANOS/TAILLES", sizes_file(kernel, initrd, bootimg))},
+                    "TAILLES": pad("TITANOS/TAILLES", sizes_file(kernel, initrd, bootimg)),
+                    # après les fichiers du système : leurs secteurs ne changent pas
+                    "VERSION": version or b"0\n"},
         "LISEZMOI.TXT": readme,
     }
     fat = Fat32(part_sectors, PART_START)
@@ -316,8 +318,8 @@ def read_back(disk, path):
     return read(c, size)
 
 
-def write_images(disk_mb, efi, mbr_code, stage2, kernel, initrd, cmdline, readme, bootimg, img_path, vhd_path=None):
-    disk, s2, info = build_disk(disk_mb, efi, mbr_code, stage2, kernel, initrd, cmdline, readme, bootimg)
+def write_images(disk_mb, efi, mbr_code, stage2, kernel, initrd, cmdline, readme, bootimg, img_path, vhd_path=None, version=b""):
+    disk, s2, info = build_disk(disk_mb, efi, mbr_code, stage2, kernel, initrd, cmdline, readme, bootimg, version)
     if read_back(disk, "TITANOS/VMLINUZ")[:len(kernel)] != kernel or read_back(disk, "TITANOS/INITRD.IMG")[:len(initrd)] != initrd:
         raise SystemExit("échec de la vérification de l'image")
     if disk[info["kernel_lba"] * SECTOR:info["kernel_lba"] * SECTOR + 1024] != kernel[:1024]:

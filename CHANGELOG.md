@@ -2,6 +2,14 @@
 
 Toutes les versions sont dans les [versions publiées](../../releases). Depuis la bêta 6, TitanOs se met à jour tout seul.
 
+## Bêta 21
+
+**Mise à jour par clé USB**, sans Internet, de deux façons, dans l'application Mises à jour :
+- **Depuis une clé TitanOs** : démarrez sur une clé qui a une version plus récente. TitanOs trouve celui qui est installé sur le disque et propose « Mettre à jour le disque ». Le disque prend la version de la clé, en gardant vos fichiers et vos applications.
+- **Avec le fichier `titanos-maj.tar.gz`** (dans chaque version publiée) : copiez-le sur n'importe quelle clé USB et branchez-la. TitanOs propose « Installer ce paquet ». Les sommes SHA-256 sont vérifiées avant toute écriture.
+
+Chaque installation note aussi son numéro de version dans `TITANOS/VERSION`.
+
 ## Bêta 20
 
 - La recherche de mise à jour n'utilise plus l'API de GitHub. Sans compte, celle-ci n'accepte que 60 demandes par heure ; au-delà, elle répondait « erreur 403 ». TitanOs lit maintenant le numéro de version directement dans la dernière version publiée, par un lien qui n'a pas cette limite.

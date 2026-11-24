@@ -71,6 +71,11 @@ def modname(path):
     return norm(b.split(".ko")[0])
 
 
+def build_number():
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return re.search(r'#define TITANOS_BUILD\s+(\d+)', open(os.path.join(root, "src", "core", "base.h"), encoding="utf-8").read()).group(1)
+
+
 def write_update(out, info, s2, kernel, initrd, bimg):
     """Paquet de mise à jour publié avec chaque version (titanos-maj.tar.gz).
 
@@ -345,7 +350,7 @@ def build(repo, B):
 
     print("[image disque]")
     import mkimage
-    readme = ("TitanOs beta 20 - systeme d'exploitation sur base Linux\r\n\r\n"
+    readme = ("TitanOs beta 21 - systeme d'exploitation sur base Linux\r\n\r\n"
               "TITANOS\\VMLINUZ     noyau Linux\r\n"
               "TITANOS\\INITRD.IMG  systeme TitanOs (bureau, pilotes, BusyBox)\r\n"
               "EFI\\BOOT\\BOOTX64.EFI chargeur UEFI (Secure Boot desactive)\r\n"
@@ -355,12 +360,12 @@ def build(repo, B):
     ttc = repo.fetch("font-inter")["usr/share/fonts/inter/Inter.ttc"][1]
     disk, s2, info = mkimage.write_images(DISK_MB, open(efi_path, "rb").read(), boot["mbr"], boot["stage2"],
                                           vmlinuz, initrd, CMDLINE, readme, bootimg.build(ttc), img,
-                                          os.path.join(out, "titanos.vhd"))
+                                          os.path.join(out, "titanos.vhd"), version=(build_number() + "\n").encode())
     with open(os.path.join(out, "obj-boot", "stage2-final.bin"), "wb") as f:
         f.write(s2)
     write_update(out, info, s2, vmlinuz, initrd, bootimg.build(ttc))
     print(f"  noyau au secteur {info['kernel_lba']}, initramfs au secteur {info['initrd_lba']}, "
           f"chargé à {info['initrd_addr'] >> 20} Mo ; {info['free_mb']} Mo libres pour vos fichiers")
-    print(f"\nTitanOs bêta 20 est prêt :")
+    print(f"\nTitanOs bêta 21 est prêt :")
     print(f"  build/titanos.img   image pour clé USB ({DISK_MB} Mo, démarre en BIOS et en UEFI)")
     print(f"  build/titanos.vhd   disque virtuel (VirtualBox, Hyper-V génération 1)")

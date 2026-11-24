@@ -25,8 +25,8 @@ typedef __builtin_va_list va_list;
 #define false 0
 #define NULL  ((void *)0)
 
-#define TITANOS_VERSION "Bêta 20"
-#define TITANOS_BUILD   20             /* numéro de version, comparé aux mises à jour publiées */
+#define TITANOS_VERSION "Bêta 21"
+#define TITANOS_BUILD   21             /* numéro de version, comparé aux mises à jour publiées */
 #define countof(a) ((int)(sizeof(a) / sizeof((a)[0])))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -185,6 +185,10 @@ bool  plat_install_possible(void);                         /* démarré depuis u
 int   plat_install_disks(disk_info_t *list, int max);      /* disques et clés utilisables (sauf celui en cours) */
 bool  plat_install_start(const char *dev);                 /* efface le disque et y copie TitanOs */
 int   plat_install_state(char *msg, int n, int *percent);
+int   plat_update_files(char paths[][160], int max);        /* paquets titanos-maj.tar.gz sur les clés */
+bool  plat_update_from_file(const char *path);             /* installe un paquet posé sur une clé */
+bool  plat_other_titanos(char *desc, int n);                /* un autre TitanOs (disque interne) ? */
+bool  plat_update_other(void);                              /* lui donne la version de cette clé */
 
 /* Wi-Fi (wpa_supplicant) */
 typedef struct { char ssid[33]; int signal; bool secure, known, current; } wifi_net_t;

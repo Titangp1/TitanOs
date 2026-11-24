@@ -15,17 +15,20 @@
  *
  * Tout se fait dans un processus à part, qui envoie son état au bureau par un tube. */
 #include "linux.h"
+#include "../core/desk.h"
 
 #define REPO      "Titangp1/TitanOs"
 #define WORK      "/tmp/maj"
 
-/* tailles réservées aux fichiers du système : les mêmes que PADDED dans tools/mkimage.py */
-static const struct { const char *path, *name; long size; } SYSFILES[] = {
-    { "/media/titanos/TITANOS/VMLINUZ",       "VMLINUZ",     32l << 20 },
-    { "/media/titanos/TITANOS/INITRD.IMG",    "INITRD.IMG",  64l << 20 },
-    { "/media/titanos/TITANOS/BOOT.IMG",      "BOOT.IMG",    2l << 20 },
-    { "/media/titanos/TITANOS/TAILLES",       "TAILLES",     4096 },
-    { "/media/titanos/EFI/BOOT/BOOTX64.EFI",  "BOOTX64.EFI", 1l << 20 },
+/* fichiers du système, dans la partition TitanOs ; tailles réservées : les mêmes que PADDED
+ * dans tools/mkimage.py */
+#define NSYS 5
+static const struct { const char *path, *name; long size; } SYSFILES[NSYS] = {
+    { "TITANOS/VMLINUZ",       "VMLINUZ",     32l << 20 },
+    { "TITANOS/INITRD.IMG",    "INITRD.IMG",  64l << 20 },
+    { "TITANOS/BOOT.IMG",      "BOOT.IMG",    2l << 20 },
+    { "TITANOS/TAILLES",       "TAILLES",     4096 },
+    { "EFI/BOOT/BOOTX64.EFI",  "BOOTX64.EFI", 1l << 20 },
 };
 
 /* ---------------- état transmis au bureau ---------------- */
@@ -134,6 +137,20 @@ static bool write_all(int fd, const void *p, long n) {
     return true;
 }
 
+static bool parent_of(const char *part, char *disk, int n) {
+    char sys[96], link[256];
+    snprintf(sys, sizeof sys, "/sys/class/block/%s", part);
+    long r = sys_readlink(sys, link, sizeof link - 1);
+    if (r <= 0) return false;
+    link[r] = 0;
+    char *last = strrchr(link, '/');
+    if (!last) return false;
+    *last = 0;
+    char *prev = strrchr(link, '/');
+    strlcpy(disk, prev ? prev + 1 : link, (size_t)n);
+    return strcmp(disk, "block") != 0;
+}
+
 /* disque qui porte la clé (ou le disque) TitanOs en cours d'utilisation : « sdb » */
 static bool boot_disk(char *disk, int n) {
     static char m[32768];                       /* les montages overlay ont de longues options */
@@ -202,6 +219,90 @@ static void net_diagnose(char *out, int n) {
     else snprintf(out, (size_t)n, "Connexion sécurisée à GitHub impossible : %s", err[0] ? err : "erreur inconnue");
 }
 
+/* Réécrit sur place le système d'une partition TitanOs montée en `root`, sur le disque `dev`.
+ * src[i] : contenu de chaque fichier du système (complété de zéros jusqu'à sa taille
+ * réservée), puis le MBR (440 octets de code) et le chargeur BIOS (stage2). Les fichiers de
+ * l'utilisateur ne sont pas touchés. */
+static bool apply_system(const char *root, const char *dev, char *const src[NSYS], const uint8_t *mbr,
+                         const uint8_t *s2, long s2n, int build) {
+    uint8_t cur[512];
+    int dfd = sys_open(dev, O_RDWR | O_CLOEXEC, 0);
+    uint32_t a[3], b[3];
+    bool same = s2 && dfd >= 0 && sys_lseek(dfd, 512, 0) == 512 && sys_read(dfd, cur, 512) == 512 &&
+                s2_layout(cur, 512, a) && s2_layout(s2, s2n, b) && !memcmp(a, b, sizeof a);
+    char path[160];
+    for (int i = 0; same && i < NSYS; i++) {
+        snprintf(path, sizeof path, "%s/%s", root, SYSFILES[i].path);
+        if (file_size(path) != SYSFILES[i].size) same = false;
+    }
+    if (!same || s2n > 63 * 512) {
+        if (dfd >= 0) sys_close(dfd);
+        say(UPD_ERROR, -1, "Ce TitanOs est trop ancien pour se mettre à jour ainsi : réinstallez-le (Rufus ou « Installer sur ce disque »).");
+        return false;
+    }
+    say(UPD_INSTALLING, 0, "Installation de la bêta %d… ne pas éteindre", build);
+    static uint8_t zero[65536];
+    long total = 0, done = 0;
+    for (int i = 0; i < NSYS; i++) total += SYSFILES[i].size;
+    for (int i = 0; i < NSYS; i++) {
+        long len;
+        uint8_t *data = slurp(src[i], &len);
+        if (data && len > SYSFILES[i].size) len = SYSFILES[i].size;
+        snprintf(path, sizeof path, "%s/%s", root, SYSFILES[i].path);
+        int fd = data ? sys_open(path, O_WRONLY | O_CLOEXEC, 0) : -1;
+        bool ok = fd >= 0 && write_all(fd, data, len);
+        for (long left = SYSFILES[i].size - len; ok && left > 0; left -= (long)sizeof zero)
+            ok = write_all(fd, zero, MIN(left, (long)sizeof zero));
+        if (fd >= 0) { sc1(__NR_fsync, fd); sys_close(fd); }
+        free(data);
+        if (!ok) {
+            sys_close(dfd);
+            say(UPD_ERROR, -1, "Échec de l'écriture de %s : si TitanOs ne démarre plus, réinstallez-le avec Rufus.", SYSFILES[i].name);
+            return false;
+        }
+        done += SYSFILES[i].size;
+        say(UPD_INSTALLING, (int)(done * 90 / total), "Installation de la bêta %d… ne pas éteindre", build);
+    }
+    bool ok = mbr && sys_lseek(dfd, 0, 0) == 0 && write_all(dfd, mbr, 440) &&
+              sys_lseek(dfd, 512, 0) == 512 && write_all(dfd, s2, s2n);
+    sc1(__NR_fsync, dfd);
+    sys_close(dfd);
+    char v[16];
+    snprintf(path, sizeof path, "%s/TITANOS/VERSION", root);
+    snprintf(v, sizeof v, "%d\n", build);
+    plat_writefile(path, v, strlen(v));                 /* numéro de la version installée */
+    sys_sync();
+    if (!ok) { say(UPD_ERROR, -1, "Échec de l'écriture du chargeur de démarrage."); return false; }
+    return true;
+}
+
+/* paquet titanos-maj.tar.gz (téléchargé ou sur une clé) : vérifié puis installé sur le
+ * TitanOs en cours */
+static void install_package(const char *tgz, bool quiet) {
+    char *tar[] = { "/bin/busybox", "tar", "-xzf", (char *)tgz, "-C", WORK, NULL };
+    char *sum[] = { "/bin/busybox", "sh", "-c", "cd " WORK " && /bin/busybox sha256sum -c -s SHA256SUMS", NULL };
+    say(UPD_INSTALLING, 0, "Vérification du paquet…");
+    if (run(tar) != 0 || run(sum) != 0) { say(UPD_ERROR, -1, "Le paquet de mise à jour est abîmé : rien n'a été changé."); return; }
+    char v[16];
+    int build = read_file(WORK "/VERSION", v, sizeof v) > 0 ? atoi(v) : -1;
+    if (build <= 0) { say(UPD_ERROR, -1, "Paquet de mise à jour incohérent."); return; }
+    if (build <= TITANOS_BUILD) { say(quiet ? UPD_UPTODATE : UPD_ERROR, -1, "Ce paquet (bêta %d) n'est pas plus récent que TitanOs (" TITANOS_VERSION ").", build); return; }
+    char disk[32], dev[48];
+    if (!boot_disk(disk, sizeof disk)) { say(UPD_ERROR, -1, "Disque de TitanOs introuvable."); return; }
+    snprintf(dev, sizeof dev, "/dev/%s", disk);
+    long s2n, mn;
+    uint8_t *s2 = slurp(WORK "/stage2.bin", &s2n), *mbr = slurp(WORK "/mbr.bin", &mn);
+    char *src[NSYS];
+    static char names[NSYS][64];
+    for (int i = 0; i < NSYS; i++) { snprintf(names[i], sizeof names[i], WORK "/%s", SYSFILES[i].name); src[i] = names[i]; }
+    bool ok = mn == 440 && apply_system("/media/titanos", dev, src, mbr, s2, s2n, build);
+    free(s2);
+    free(mbr);
+    if (!ok) return;
+    klog("mise à jour : bêta %d installée", build);
+    say(UPD_DONE, 100, "Bêta %d installée : redémarrez pour l'utiliser.", build);
+}
+
 static void update_main(void *arg) {
     bool quiet = arg != NULL;              /* recherche automatique : pas d'erreur affichée */
     say(UPD_CHECKING, -1, "Recherche d'une mise à jour…");
@@ -222,14 +323,10 @@ static void update_main(void *arg) {
     int build = vb[0] >= '0' && vb[0] <= '9' ? atoi(vb) : -1;
     if (build < 0) { say(quiet ? UPD_IDLE : UPD_ERROR, -1, "Réponse de GitHub incomprise."); return; }
     if (build <= TITANOS_BUILD) { say(UPD_UPTODATE, -1, "TitanOs est à jour (" TITANOS_VERSION ")."); return; }
-    char tag[32];
-    snprintf(tag, sizeof tag, "bêta %d", build);
-    klog("mise à jour : %s disponible", tag);
-
+    klog("mise à jour : bêta %d disponible", build);
     /* téléchargement, avec la taille reçue affichée */
-    char url[192];
-    snprintf(url, sizeof url, "https://github.com/" REPO "/releases/latest/download/titanos-maj.tar.gz");
-    char *get[] = { "/usr/bin/curl", "-fsSL", "--max-time", "900", "-o", WORK "/maj.tar.gz", url, NULL };
+    char *get[] = { "/usr/bin/curl", "-fsSL", "--max-time", "900", "-o", WORK "/maj.tar.gz",
+                    "https://github.com/" REPO "/releases/latest/download/titanos-maj.tar.gz", NULL };
     int pid = sys_fork();
     if (pid == 0) {
         int nul = sys_open("/dev/null", O_RDWR, 0);
@@ -245,64 +342,99 @@ static void update_main(void *arg) {
         sleep_ms(500);
     }
     if (st != 0) { say(quiet ? UPD_IDLE : UPD_ERROR, -1, "Le téléchargement a échoué."); return; }
-    char *tar[] = { "/bin/busybox", "tar", "-xzf", WORK "/maj.tar.gz", "-C", WORK, NULL };
-    char *sum[] = { "/bin/busybox", "sh", "-c", "cd " WORK " && /bin/busybox sha256sum -c -s SHA256SUMS", NULL };
-    if (run(tar) != 0 || run(sum) != 0) { say(UPD_ERROR, -1, "Le paquet téléchargé est abîmé : mise à jour annulée."); return; }
-    char v[16];
-    if (read_file(WORK "/VERSION", v, sizeof v) <= 0 || atoi(v) != build) { say(UPD_ERROR, -1, "Paquet de mise à jour incohérent."); return; }
+    install_package(WORK "/maj.tar.gz", quiet);
+}
 
-    /* la nouvelle version doit avoir la même disposition que celle installée */
-    char disk[32], dev[48];
-    if (!boot_disk(disk, sizeof disk)) { say(UPD_ERROR, -1, "Disque de TitanOs introuvable."); return; }
+/* ---- mise à jour depuis une clé USB : fichier titanos-maj.tar.gz posé sur la clé ---- */
+static char pkg_path[160];
+static void file_main(void *arg) {
+    (void)arg;
+    char *rm[] = { "/bin/busybox", "rm", "-rf", WORK, NULL };
+    run(rm);
+    mkdirs(WORK);
+    install_package(pkg_path, false);
+}
+
+int plat_update_files(char paths[][160], int max) {
+    volume_t v[8];
+    int nv = plat_volumes(v, 8), n = 0;
+    for (int i = 0; i < nv && n < max; i++) {
+        snprintf(paths[n], 160, "%s/titanos-maj.tar.gz", v[i].path);
+        if (file_size(paths[n]) > 0) n++;
+    }
+    return n;
+}
+
+bool plat_update_from_file(const char *path) {
+    if (ins.pid > 0 || upd.pid > 0) return false;
+    strlcpy(pkg_path, path, sizeof pkg_path);
+    return job_start(&upd, file_main, NULL);
+}
+
+/* ---- depuis une clé TitanOs : mettre à jour le TitanOs installé sur un autre disque ---- */
+static char other_part[32];
+static void label_cb(const char *name, int type, void *ctx) {
+    (void)type;
+    const char *boot = ctx;
+    char p[96], disk[32];
+    snprintf(p, sizeof p, "/sys/class/block/%s/partition", name);
+    if (other_part[0] || !path_exists(p) || !parent_of(name, disk, sizeof disk) || !strcmp(disk, boot)) return;
+    snprintf(p, sizeof p, "/dev/%s", name);
+    int fd = sys_open(p, O_RDONLY | O_CLOEXEC, 0);
+    if (fd < 0) return;
+    uint8_t b[512];
+    if (sys_read(fd, b, 512) == 512 && b[510] == 0x55 && !memcmp(b + 71, "TITANOS    ", 11)) strlcpy(other_part, name, sizeof other_part);
+    sys_close(fd);
+}
+
+/* un autre TitanOs (sur le disque interne quand on démarre d'une clé) : sa description */
+bool plat_other_titanos(char *desc, int n) {
+    char boot[32];
+    if (!boot_disk(boot, sizeof boot)) return false;
+    other_part[0] = 0;
+    for_each_dir("/sys/class/block", label_cb, boot);
+    if (!other_part[0]) return false;
+    char disk[32], p[96], m[64];
+    parent_of(other_part, disk, sizeof disk);
+    snprintf(p, sizeof p, "/sys/block/%s/device/model", disk);
+    if (read_file(p, m, sizeof m) > 0 && trim(m)[0]) snprintf(desc, (size_t)n, "%s (%s)", trim(m), disk);
+    else snprintf(desc, (size_t)n, "disque %s", disk);
+    return true;
+}
+
+static void other_main(void *arg) {
+    (void)arg;
+    char boot[32], disk[32], dev[48], bdev[48], part[48];
+    if (!boot_disk(boot, sizeof boot) || !other_part[0] || !parent_of(other_part, disk, sizeof disk)) { say(UPD_ERROR, -1, "Aucun autre TitanOs trouvé."); return; }
     snprintf(dev, sizeof dev, "/dev/%s", disk);
-    long s2n;
-    uint8_t *s2 = slurp(WORK "/stage2.bin", &s2n);
-    uint8_t cur[512];
-    int dfd = sys_open(dev, O_RDWR | O_CLOEXEC, 0);
-    uint32_t a[3], b[3];
-    bool same = s2 && dfd >= 0 && sys_lseek(dfd, 512, 0) == 512 && sys_read(dfd, cur, 512) == 512 &&
-                s2_layout(cur, 512, a) && s2_layout(s2, s2n, b) && !memcmp(a, b, sizeof a);
-    for (int i = 0; same && i < countof(SYSFILES); i++) if (file_size(SYSFILES[i].path) != SYSFILES[i].size) same = false;
-    if (!same || s2n > 63 * 512) {
-        if (dfd >= 0) sys_close(dfd);
-        say(UPD_ERROR, -1, "Cette installation est trop ancienne pour se mettre à jour : réécrivez la clé avec Rufus.");
-        return;
-    }
-
-    /* réécriture sur place : fichiers du système, puis chargeur BIOS */
-    say(UPD_INSTALLING, 0, "Installation de la bêta %d… ne pas éteindre", build);
-    static uint8_t zero[65536];
-    long total = 0, done = 0;
-    for (int i = 0; i < countof(SYSFILES); i++) total += SYSFILES[i].size;
-    for (int i = 0; i < countof(SYSFILES); i++) {
-        char src[96];
-        snprintf(src, sizeof src, WORK "/%s", SYSFILES[i].name);
-        long len;
-        uint8_t *data = slurp(src, &len);
-        int fd = data && len <= SYSFILES[i].size ? sys_open(SYSFILES[i].path, O_WRONLY | O_CLOEXEC, 0) : -1;
-        bool ok = fd >= 0 && write_all(fd, data, len);
-        for (long left = SYSFILES[i].size - len; ok && left > 0; left -= (long)sizeof zero)
-            ok = write_all(fd, zero, MIN(left, (long)sizeof zero));
-        if (fd >= 0) { sc1(__NR_fsync, fd); sys_close(fd); }
-        free(data);
-        if (!ok) {
-            sys_close(dfd);
-            say(UPD_ERROR, -1, "Échec de l'écriture de %s : gardez la clé, réécrivez-la avec Rufus si TitanOs ne démarre plus.", SYSFILES[i].name);
-            return;
-        }
-        done += SYSFILES[i].size;
-        say(UPD_INSTALLING, (int)(done * 90 / total), "Installation de la bêta %d… ne pas éteindre", build);
-    }
-    long mn;
-    uint8_t *mbr = slurp(WORK "/mbr.bin", &mn);
-    bool ok = mbr && mn == 440 && sys_lseek(dfd, 0, 0) == 0 && write_all(dfd, mbr, 440) &&
-              sys_lseek(dfd, 512, 0) == 512 && write_all(dfd, s2, s2n);
-    sc1(__NR_fsync, dfd);
-    sys_close(dfd);
+    snprintf(bdev, sizeof bdev, "/dev/%s", boot);
+    snprintf(part, sizeof part, "/dev/%s", other_part);
+    say(UPD_INSTALLING, 0, "Préparation…");
+    mkdirs("/run/cible");
+    if (sys_mount(part, "/run/cible", "vfat", 1024, "iocharset=utf8,shortname=mixed") != 0) { say(UPD_ERROR, -1, "Impossible d'ouvrir le TitanOs du disque."); return; }
+    /* le chargeur et le système de cette clé deviennent ceux du disque */
+    uint8_t mbr[440];
+    static uint8_t s2[63 * 512];
+    int fd = sys_open(bdev, O_RDONLY | O_CLOEXEC, 0);
+    bool ok = fd >= 0 && sys_read(fd, mbr, 440) == 440 && sys_lseek(fd, 512, 0) == 512 && sys_read(fd, s2, sizeof s2) == (long)sizeof s2;
+    if (fd >= 0) sys_close(fd);
+    char *src[NSYS];
+    static char names[NSYS][64];
+    for (int i = 0; i < NSYS; i++) { snprintf(names[i], sizeof names[i], "/media/titanos/%s", SYSFILES[i].path); src[i] = names[i]; }
+    if (ok) ok = apply_system("/run/cible", dev, src, mbr, s2, sizeof s2, TITANOS_BUILD);
+    else say(UPD_ERROR, -1, "Lecture de la clé impossible.");
     sys_sync();
-    if (!ok) { say(UPD_ERROR, -1, "Échec de l'écriture du chargeur de démarrage."); return; }
-    klog("mise à jour : bêta %d installée", build);
-    say(UPD_DONE, 100, "Bêta %d installée : redémarrez pour l'utiliser.", build);
+    sys_umount2("/run/cible", 0);
+    if (!ok) return;
+    klog("mise à jour du disque %s : bêta %d", disk, TITANOS_BUILD);
+    say(UPD_DONE, 100, "Le TitanOs du disque est passé en " TITANOS_VERSION ", vos fichiers sont gardés. Retirez la clé et redémarrez.");
+}
+
+bool plat_update_other(void) {
+    if (ins.pid > 0 || upd.pid > 0) return false;
+    char d[96];
+    if (!plat_other_titanos(d, sizeof d)) return false;
+    return job_start(&upd, other_main, NULL);
 }
 
 void plat_update_check(bool automatic) {

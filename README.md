@@ -73,6 +73,8 @@ Quelques programmes d'Alpine sont embarqués pour ce qui ne se réinvente pas :
 
 Il faut 512 Mo de mémoire au minimum. Une fois TitanOs installé, les nouvelles versions arrivent toutes seules.
 
+**Mettre à jour sans Internet** : démarrez sur une clé TitanOs plus récente, puis ouvrez Mises à jour et choisissez « Mettre à jour le disque » (vos fichiers sont gardés). Autre solution : copiez `titanos-maj.tar.gz` (dans chaque version publiée) sur une clé USB, branchez-la, puis cliquez sur « Installer ce paquet ».
+
 ## Applications
 
 | Application | Rôle |
