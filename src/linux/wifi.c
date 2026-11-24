@@ -103,6 +103,13 @@ static void wifi_start(void) {
     /* pays : sans lui, la radio reste dans le mode « monde » (puissance et canaux réduits) */
     ok("SET country FR");
     ok("SET p2p_disabled 1");
+    /* réception faible : un réseau entendu une fois reste dans la liste un moment, au lieu de
+     * disparaître à la recherche suivante ; recherches automatiques de plus en plus espacées */
+    ok("SET bss_expiration_age 600");
+    ok("SET bss_expiration_scan_count 20");
+    ok("SET filter_ssids 0");
+    ok("SET autoscan exponential:3:60");
+    ok("SET scan_cur_freq 0");
     klog("Wi-Fi : %s prêt", iface);
 }
 
@@ -215,7 +222,10 @@ static int w_list(wifi_net_t *list, int max) {
     int sig;
     int state = w_status(cur, sizeof cur, &sig);
     if (request("SCAN_RESULTS", buf, sizeof buf) <= 0) return 0;
-    int n = 0;
+    int n = 0, bss = 0;
+    for (char *q = strchr(buf, '\n'); q && q[1]; q = strchr(q + 1, '\n')) bss++;
+    static int last_bss = -1;
+    if (bss != last_bss) { klog("Wi-Fi : %d bornes entendues", bss); last_bss = bss; }
     char *line = strchr(buf, '\n');            /* première ligne : en-têtes */
     while (line && *line && n < max) {
         line++;
