@@ -115,6 +115,14 @@ void draw_icon(canvas_t *c, int icon, float x, float y, float s) {
         squircle(c, x, y, s, 0x312E81, 0x1E1B4B);
         draw_logo(c, cx, y + s * 0.2f, s * 0.58f, 255);
         break;
+    case ICON_UPDATE: {          /* flèche circulaire : mise à jour */
+        squircle(c, x, y, s, 0x34D399, 0x047857);
+        float rr = s * 0.24f;
+        gfx_arc(c, cx, cy, rr, t * 0.9f, -1.2f, 3.9f, 0xFFECFDF5);
+        float ax = cx + fcos(-1.2f) * rr, ay = cy + fsin(-1.2f) * rr;
+        gfx_tri(c, ax + s * 0.11f, ay - s * 0.02f, ax - s * 0.06f, ay - s * 0.11f, ax - s * 0.03f, ay + s * 0.09f, 0xFFECFDF5, 0xFFECFDF5);
+        break;
+    }
     case ICON_LOCK:
         gfx_ring(c, cx, y + s * 0.38f, s * 0.2f, t, 0xFFE2E8F0);
         gfx_rrect(c, x + s * 0.22f, y + s * 0.42f, s * 0.56f, s * 0.44f, s * 0.08f, 0xFFE2E8F0);

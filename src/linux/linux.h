@@ -30,6 +30,7 @@ extern int input_screen_w, input_screen_h;
 /* audio.c, wifi.c */
 void audio_start(void);
 void hw_start(void);                 /* veilleur : Wi-Fi et batterie, hors du bureau */
+extern uint64_t display_us;          /* mesure du temps d envoi des images */
 void bat_read(battery_t *b);
 
 /* plat.c */

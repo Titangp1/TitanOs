@@ -220,8 +220,12 @@ bool display_better_available(void) {
     return false;
 }
 
+uint64_t display_us;                   /* temps passé à envoyer les images (mesure) */
+static uint64_t now_us(void) { struct timespec ts; sys_clock_gettime(CLOCK_MONOTONIC, &ts); return (uint64_t)ts.tv_sec * 1000000 + (uint64_t)ts.tv_nsec / 1000; }
+
 void display_present(const uint32_t *scene, int stride, rect_t r) {
     if (!D.map) return;
+    uint64_t t0 = now_us();
     r = rect_isect(r, R(0, 0, D.w, D.h));
     if (rect_empty(r)) return;
     for (int j = 0; j < r.h; j++)
@@ -235,4 +239,5 @@ void display_present(const uint32_t *scene, int stride, rect_t r) {
         long rr = sys_ioctl(D.fd, DRM_IOCTL_MODE_DIRTYFB, &dc);
         if (rr == -ENOSYS || rr == -EINVAL || rr == -EOPNOTSUPP) D.dirty_ok = false;
     }
+    display_us += now_us() - t0;
 }

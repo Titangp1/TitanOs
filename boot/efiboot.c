@@ -122,7 +122,9 @@ static void draw_splash(void) {
 }
 
 /* ---- lecture d'un fichier sur la partition de démarrage (les crêtes s'animent pendant ce temps) ---- */
-static EFI_STATUS read_file(EFI_FILE *root, CHAR16 *path, void **buf, UINTN *size) {
+/* les fichiers du système ont une taille fixe (complétés de zéros, pour les mises à jour) :
+ * \TITANOS\TAILLES donne la taille utile de chacun, on ne lit que celle-ci */
+static EFI_STATUS read_file(EFI_FILE *root, CHAR16 *path, void **buf, UINTN *size, UINT64 limit) {
     EFI_FILE *f;
     EFI_STATUS s = root->Open(root, &f, path, 1 /* lecture */, 0);
     if (EFI_ERROR(s)) return s;
@@ -130,6 +132,7 @@ static EFI_STATUS read_file(EFI_FILE *root, CHAR16 *path, void **buf, UINTN *siz
     f->SetPosition(f, 0xFFFFFFFFFFFFFFFFull);
     f->GetPosition(f, &end);
     f->SetPosition(f, 0);
+    if (limit && limit < end) end = limit;
     s = BS->AllocatePool(EfiLoaderData, (UINTN)end + 16, buf);
     if (EFI_ERROR(s)) { f->Close(f); return s; }
     UINTN done = 0;
@@ -209,16 +212,27 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st) {
         fail(u"impossible de lire la cle USB.");
         return EFI_NOT_FOUND;
     }
+    /* tailles utiles : « noyau initramfs images », en décimal */
+    UINT64 sz[3] = { 0, 0, 0 };
+    void *tl;
+    UINTN tls;
+    if (!EFI_ERROR(read_file(root, u"\\TITANOS\\TAILLES", &tl, &tls, 512))) {
+        const char *t = tl;
+        for (int k = 0, i = 0; k < 3 && i < (int)tls; k++) {
+            while (i < (int)tls && (t[i] < '0' || t[i] > '9')) i++;
+            while (i < (int)tls && t[i] >= '0' && t[i] <= '9') sz[k] = sz[k] * 10 + (UINT64)(t[i++] - '0');
+        }
+    }
     void *img;
     UINTN isz;
-    if (!EFI_ERROR(read_file(root, u"\\TITANOS\\BOOT.IMG", &img, &isz)) && isz > 56 && !memcmp_(img, "TBIM", 4)) {
+    if (!EFI_ERROR(read_file(root, u"\\TITANOS\\BOOT.IMG", &img, &isz, sz[2])) && isz > 56 && !memcmp_(img, "TBIM", 4)) {
         bi = img;
         draw_splash();
     }
     void *kernel;
     UINTN ksize;
-    if (EFI_ERROR(read_file(root, u"\\TITANOS\\VMLINUZ", &kernel, &ksize))) { fail(u"noyau \\TITANOS\\VMLINUZ introuvable."); return EFI_NOT_FOUND; }
-    if (EFI_ERROR(read_file(root, u"\\TITANOS\\INITRD.IMG", &initrd, &initrd_size))) { fail(u"\\TITANOS\\INITRD.IMG introuvable."); return EFI_NOT_FOUND; }
+    if (EFI_ERROR(read_file(root, u"\\TITANOS\\VMLINUZ", &kernel, &ksize, sz[0]))) { fail(u"noyau \\TITANOS\\VMLINUZ introuvable."); return EFI_NOT_FOUND; }
+    if (EFI_ERROR(read_file(root, u"\\TITANOS\\INITRD.IMG", &initrd, &initrd_size, sz[1]))) { fail(u"\\TITANOS\\INITRD.IMG introuvable."); return EFI_NOT_FOUND; }
 
     EFI_HANDLE h = 0;
     EFI_GUID dpg = DEVICE_PATH_GUID, lfg = LOAD_FILE2_GUID;

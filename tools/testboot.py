@@ -30,7 +30,15 @@ mu.mem_write(0x7C00, disk[:512])                # le BIOS charge le MBR
 mu.reg_write(X.UC_X86_REG_EDX, 0x80)            # disque de démarrage
 mu.reg_write(X.UC_X86_REG_ESP, 0x7000)
 text, unknown, vbe_set = [], [], [None]
-MODES = {0x118: (1024, 768), 0x144: (1600, 900), 0x145: (1920, 1080), 0x146: (2560, 1440)}
+# écran simulé : modes VBE proposés et résolution native (EDID).
+# TESTBOOT_VAIO=1 imite la carte NVIDIA du VAIO : pas de mode 1920x1080, mais un 1366x768.
+if os.environ.get("TESTBOOT_VAIO"):
+    MODES = {0x118: (1024, 768), 0x11B: (1280, 1024), 0x160: (1366, 768), 0x161: (1600, 1200)}
+    EXPECT = (1366, 768)
+else:
+    MODES = {0x118: (1024, 768), 0x144: (1600, 900), 0x145: (1920, 1080), 0x146: (2560, 1440)}
+    EXPECT = (1920, 1080)
+NATIVE = (1920, 1080)
 E820 = [(0, 0x9FC00, 1), (0x9FC00, 0x400, 2), (0xF0000, 0x10000, 2), (0x100000, 0x7FE00000, 1), (0xFEC00000, 0x1400000, 2)]
 
 
@@ -59,7 +67,7 @@ def bios(uc, intno, _):
             blk[0:4] = b"VESA"
             struct.pack_into("<HxxxxxxxHHH", blk, 4, 0x0300, 0x6000, 0, 256)
             uc.mem_write(es_di, bytes(blk))
-            uc.mem_write(0x6000, struct.pack("<5H", *MODES, 0xFFFF))
+            uc.mem_write(0x6000, struct.pack(f"<{len(MODES) + 1}H", *MODES, 0xFFFF))
             setreg("AX", 0x4F)
         elif ax == 0x4F01:                           # informations sur un mode
             w, h = MODES.get(reg("CX"), (0, 0))
@@ -71,6 +79,14 @@ def bios(uc, intno, _):
             struct.pack_into("<I", mi, 40, 0xE0000000)
             struct.pack_into("<H", mi, 50, w * 4)
             uc.mem_write(es_di, bytes(mi))
+            setreg("AX", 0x4F)
+        elif ax == 0x4F15 and (reg("BX") & 0xFF) == 1:  # EDID de l'écran
+            edid = bytearray(128)
+            edid[0:8] = bytes([0, 255, 255, 255, 255, 255, 255, 0])
+            w, h = NATIVE
+            edid[56], edid[58] = w & 0xFF, (w >> 8) << 4
+            edid[59], edid[61] = h & 0xFF, (h >> 8) << 4
+            uc.mem_write(es_di, bytes(edid))
             setreg("AX", 0x4F)
         elif ax == 0x4F02:
             vbe_set[0] = reg("BX")
@@ -129,8 +145,9 @@ if not reached[0]:
     sys.exit(1)
 
 zp = bytes(mu.mem_read(reg("ESI"), 4096))
-kernel = mkimage.read_back(disk, "TITANOS/VMLINUZ")
-initrd = mkimage.read_back(disk, "TITANOS/INITRD.IMG")
+ksz, isz, _ = map(int, mkimage.read_back(disk, "TITANOS/TAILLES").split(b"\0")[0].split())   # tailles utiles
+kernel = mkimage.read_back(disk, "TITANOS/VMLINUZ")[:ksz]
+initrd = mkimage.read_back(disk, "TITANOS/INITRD.IMG")[:isz]
 pm = kernel[((kernel[0x1F1] or 4) + 1) * 512:]
 rd_addr, rd_size = struct.unpack_from("<II", zp, 0x218)
 cmd = bytes(mu.mem_read(struct.unpack_from("<I", zp, 0x228)[0], 512)).split(b"\0")[0].decode()
@@ -141,11 +158,11 @@ checks = {
     f"initramfs copié à {rd_addr >> 20} Mo": rd_size == len(initrd) and bytes(mu.mem_read(rd_addr, rd_size)) == initrd,
     "en-tête du noyau (HdrS)": zp[0x202:0x206] == b"HdrS" and zp[0x210] == 0xFF,
     f"carte mémoire E820 ({zp[0x1E8]} zones)": zp[0x1E8] == len(E820),
-    "écran VBE décrit (1920x1080x32)": zp[0x0F] == 0x23 and struct.unpack_from("<HHH", zp, 0x12) == (1920, 1080, 32),
-    f"ligne de commande : {cmd}": "quiet" in cmd,
+    f"écran VBE décrit ({EXPECT[0]}x{EXPECT[1]}x32)": zp[0x0F] == 0x23 and struct.unpack_from("<HHH", zp, 0x12) == (*EXPECT, 32),
+    f"ligne de commande : {cmd}": "quiet" in cmd and f"titanos.disk={struct.unpack_from('<I', disk, 440)[0]:08x}" in cmd,
 }
 # ce que le chargeur a dessiné à l'écran : le logo au centre, le fond en dégradé
-FBW, FBH = 1920, 1080
+FBW, FBH = EXPECT
 
 
 def pixel(x, y):

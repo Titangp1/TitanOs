@@ -16,8 +16,17 @@
 #define sqrtf __builtin_sqrtf
 #define fabsf __builtin_fabsf
 
-static uint32_t *tmp_a, *tmp_b;
+static uint32_t *tmp_a, *tmp_b, *rowbuf;
 static size_t tmp_n;
+static int rowbuf_n;
+
+/* mélange de deux couleurs 0x00RRGGBB, t de 0 à 256 (deux canaux à la fois) */
+static inline uint32_t lerp_px(uint32_t a, uint32_t b, uint32_t t) {
+    uint32_t it = 256 - t;
+    uint32_t rb = (((a & 0xFF00FF) * it + (b & 0xFF00FF) * t) >> 8) & 0xFF00FF;
+    uint32_t g = (((a & 0x00FF00) * it + (b & 0x00FF00) * t) >> 8) & 0x00FF00;
+    return rb | g;
+}
 
 static bool ensure(size_t n) {
     if (n <= tmp_n) return true;
@@ -91,9 +100,21 @@ void glass_render(canvas_t *out, const canvas_t *scene, rect_t r, float radius, 
     int dw = (S.w + f - 1) / f, dh = (S.h + f - 1) / f;
     if (rect_empty(S) || !ensure((size_t)dw * dh)) { canvas_clear(out, 0); return; }
 
-    /* 1. réduction */
+    /* 1. réduction : blocs complets additionnés deux canaux à la fois, bords au cas par cas */
+    bool pow2 = f == 2 || f == 4;
+    int fullw = pow2 ? S.w / f : 0, fullh = pow2 ? S.h / f : 0, sh = f == 4 ? 4 : 2;
+    for (int y = 0; y < fullh; y++)
+        for (int x = 0; x < fullw; x++) {
+            uint32_t rb = 0, gg = 0;
+            for (int j = 0; j < f; j++) {
+                const uint32_t *row = scene->px + (size_t)(S.y + y * f + j) * scene->stride + S.x + x * f;
+                for (int i = 0; i < f; i++) { rb += row[i] & 0xFF00FF; gg += row[i] & 0x00FF00; }
+            }
+            tmp_a[(size_t)y * dw + x] = ((rb >> sh) & 0xFF00FF) | ((gg >> sh) & 0x00FF00);
+        }
     for (int y = 0; y < dh; y++)
         for (int x = 0; x < dw; x++) {
+            if (y < fullh && x < fullw && f > 1) continue;
             int rr = 0, gg = 0, bb = 0, n = 0;
             for (int j = 0; j < f; j++) {
                 int sy = S.y + y * f + j;
@@ -137,12 +158,62 @@ void glass_render(canvas_t *out, const canvas_t *scene, rect_t r, float radius, 
     float band = MIN(g->band, MIN(hx, hy));
     float ox = (float)(r.x - S.x), oy = (float)(r.y - S.y);
     const float lx = -0.6f, ly = -0.8f;      /* direction de la lumière */
+    /* au-delà de B pixels du bord, un pixel n'a ni réfraction ni liseré et il est opaque :
+     * seul le reflet (constant sur une ligne) s'ajoute au fond flouté */
+    float B = MAX(g->refract > 0 ? band : 0.0f, g->rim > 0 ? 2.2f : 0.0f);
+    if (B < 0.5f) B = 0.5f;
+    B += 1.0f;                                               /* marge : le bord exact reste au calcul complet */
     for (int j = 0; j < r.h; j++) {
         float py = j + 0.5f;
         uint32_t *op = out->px + (size_t)j * out->stride;
         float sheen = g->sheen * (1.0f - py / (h * 0.55f));
         if (sheen < 0) sheen = 0;
+        /* partie intérieure de la ligne : [i0, i1) */
+        int i0 = r.w, i1 = r.w;
+        float ay = fabsf(py - cy);
+        if (ay <= hy - B) {
+            float half;
+            float qy = ay - (hy - rad);
+            if (rad > B && qy > 0) {
+                float ri = rad - B;
+                half = qy < ri ? (hx - rad) + sqrtf(ri * ri - qy * qy) : -1;
+            } else half = hx - B;
+            if (half > 0) {
+                i0 = (int)ceilf(cx - half - 0.5f);
+                i1 = (int)floorf(cx + half - 0.5f) + 1;
+                if (i0 < 0) i0 = 0;
+                if (i1 > r.w) i1 = r.w;
+                if (i1 < i0) i0 = i1 = r.w;
+            }
+        }
+        if (i0 < i1) {
+            if (rowbuf_n < dw) { free(rowbuf); rowbuf = malloc((size_t)dw * 4); rowbuf_n = rowbuf ? dw : 0; }
+            if (!rowbuf) { i0 = i1 = r.w; }
+        }
+        if (i0 < i1) {
+            /* ligne du fond réduit, interpolée verticalement, avec le reflet (linéaire) */
+            int v = (int)(((py + oy) / f - 0.5f) * 256);
+            int y = v >> 8, fy = v & 255;
+            if (y < 0) { y = 0; fy = 0; }
+            if (y >= dh - 1) { y = dh - 1; fy = 0; }
+            const uint32_t *ra = tmp_a + (size_t)y * dw, *rb2 = tmp_a + (size_t)MIN(y + 1, dh - 1) * dw;
+            uint32_t ad = (uint32_t)MIN((int)(sheen * 256 + 0.5f), 256);
+            for (int x = 0; x < dw; x++) {
+                uint32_t p = lerp_px(ra[x], rb2[x], (uint32_t)fy);
+                if (ad) p = lerp_px(p, 0xFFFFFF, ad);
+                rowbuf[x] = p;
+            }
+            /* puis horizontalement, par pas de 1/f */
+            int u = (int)(((i0 + 0.5f + ox) / f - 0.5f) * 256), du = 256 / f;
+            for (int i = i0; i < i1; i++, u += du) {
+                int x = u >> 8, fx = u & 255;
+                if (x < 0) { x = 0; fx = 0; }
+                if (x >= dw - 1) { x = dw - 1; fx = 0; }
+                op[i] = 0xFF000000u | (fx ? lerp_px(rowbuf[x], rowbuf[x + 1], (uint32_t)fx) : rowbuf[x]);
+            }
+        }
         for (int i = 0; i < r.w; i++) {
+            if (i == i0) { i = i1 - 1; continue; }
             float px = i + 0.5f;
             float qx = fabsf(px - cx) - (hx - rad), qy = fabsf(py - cy) - (hy - rad);
             float d, nx, ny;

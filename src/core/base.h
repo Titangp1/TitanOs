@@ -25,7 +25,8 @@ typedef __builtin_va_list va_list;
 #define false 0
 #define NULL  ((void *)0)
 
-#define TITANOS_VERSION "Bêta 5"
+#define TITANOS_VERSION "Bêta 6"
+#define TITANOS_BUILD   6              /* numéro de version, comparé aux mises à jour publiées */
 #define countof(a) ((int)(sizeof(a) / sizeof((a)[0])))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -69,6 +70,7 @@ void   free(void *p);
 void   sort(void *base, size_t n, size_t sz, int (*cmp)(const void *, const void *));
 float  fsin(float x);                       /* sinus et cosinus sans libm */
 float  floorf(float x);
+float  ceilf(float x);
 float  fcos(float x);
 
 /* ---------------- rectangles ---------------- */
@@ -159,9 +161,19 @@ typedef struct { bool present, charging, ac; int percent, minutes; } battery_t;
 void  plat_battery(battery_t *b);
 void  plat_diag(char *buf, int n);                   /* ligne de diagnostic (bêta), vide sinon */
 
+/* mises à jour (GitHub) et installation sur le disque interne */
+enum { UPD_IDLE, UPD_CHECKING, UPD_UPTODATE, UPD_DOWNLOADING, UPD_INSTALLING, UPD_DONE, UPD_ERROR };
+typedef struct { char dev[16]; char model[48]; uint64_t bytes; } disk_info_t;
+void  plat_update_check(bool automatic);                   /* recherche, télécharge et installe */
+int   plat_update_state(char *msg, int n, int *percent);   /* UPD_* ; percent -1 si inconnu */
+bool  plat_install_possible(void);                         /* démarré depuis une clé USB */
+int   plat_install_disks(disk_info_t *list, int max);      /* disques internes utilisables */
+bool  plat_install_start(const char *dev);                 /* efface le disque et y copie TitanOs */
+int   plat_install_state(char *msg, int n, int *percent);
+
 /* Wi-Fi (wpa_supplicant) */
 typedef struct { char ssid[33]; int signal; bool secure, known, current; } wifi_net_t;
-enum { WIFI_NONE = -1, WIFI_OFF, WIFI_CONNECTING, WIFI_CONNECTED };
+enum { WIFI_NONE = -1, WIFI_OFF, WIFI_CONNECTING, WIFI_CONNECTED, WIFI_BLOCKED };   /* BLOCKED : interrupteur de la radio sur OFF */
 int   plat_wifi_status(char *ssid, int n, int *signal);     /* WIFI_* ; signal 0-100 */
 void  plat_wifi_scan(void);
 int   plat_wifi_list(wifi_net_t *list, int max);

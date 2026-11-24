@@ -21,6 +21,24 @@ static void rfkill_cb(const char *name, int type, void *ctx) {
     write_file(p, "0");                         /* débloque la radio (bouton logiciel) */
 }
 
+static void gov_cb(const char *name, int type, void *ctx) {
+    (void)type;
+    if (strncmp(name, "cpu", 3) || name[3] < '0' || name[3] > '9') return;
+    char p[96];
+    snprintf(p, sizeof p, "/sys/devices/system/cpu/%s/cpufreq/scaling_governor", name);
+    write_file(p, (const char *)ctx);
+}
+
+/* radio coupée par un interrupteur matériel (« hard ») ? */
+static void hard_cb(const char *name, int type, void *ctx) {
+    (void)type;
+    char p[96], v[16];
+    snprintf(p, sizeof p, "/sys/class/rfkill/%s/type", name);
+    if (read_file(p, v, sizeof v) <= 0 || strncmp(v, "wlan", 4)) return;
+    snprintf(p, sizeof p, "/sys/class/rfkill/%s/hard", name);
+    if (read_file(p, v, sizeof v) > 0 && v[0] == '1') *(bool *)ctx = true;
+}
+
 static void find_cb(const char *name, int type, void *ctx) {
     (void)type; (void)ctx;
     char p[96];
@@ -308,8 +326,15 @@ static void helper_main(int out, int in) {
         snap_t s;
         memset(&s, 0, sizeof s);
         bat_read(&s.bat);
+        static int gov = -1;                 /* 1 : performance (secteur), 0 : schedutil (batterie) */
+        int want = s.bat.present && !s.bat.ac ? 0 : 1;
+        if (want != gov) { gov = want; for_each_dir("/sys/devices/system/cpu", gov_cb, (void *)(want ? "performance" : "schedutil")); }
         wifi_start();
         s.wstate = ctrl >= 0 ? w_status(s.wssid, sizeof s.wssid, &s.wsignal) : WIFI_NONE;
+        for_each_dir("/sys/class/rfkill", rfkill_cb, NULL);      /* l'interrupteur logiciel peut revenir */
+        bool hard = false;
+        for_each_dir("/sys/class/rfkill", hard_cb, &hard);
+        if (hard) s.wstate = WIFI_BLOCKED;
         if (ctrl >= 0) s.nnets = w_list(s.nets, SNAP_NETS);
         sys_write(out, &s, sizeof s);                   /* tube non bloquant : perdu si le bureau est en retard */
         next = plat_ms() + 2000;

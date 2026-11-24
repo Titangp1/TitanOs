@@ -37,7 +37,21 @@ static int mods;
 enum { MODE_SPLASH, MODE_LOCK, MODE_DESK };
 static int mode = MODE_SPLASH;
 
-typedef struct { rect_t r; bool ok, shown, leaving; canvas_t cache; int level; uint64_t t0; } glass_el_t;
+/* ombre douce gardée en image : elle ne dépend que de la taille et du style */
+typedef struct { canvas_t c; int w, h, pad; float r, blur, dy; uint32_t col; } shadow_t;
+static void draw_shadow(canvas_t *dst, shadow_t *s, rect_t r, float radius, float blur, float dy, uint32_t col) {
+    int pad = (int)(blur + (dy > 0 ? dy : -dy)) + 2;
+    if (s->w != r.w || s->h != r.h || s->r != radius || s->blur != blur || s->dy != dy || s->col != col || !s->c.px) {
+        if (s->c.w != r.w + 2 * pad || s->c.h != r.h + 2 * pad) { canvas_free(&s->c); s->c = canvas_new(r.w + 2 * pad, r.h + 2 * pad); }
+        canvas_noclip(&s->c);
+        canvas_clear(&s->c, 0);
+        gfx_shadow(&s->c, (float)pad, (float)pad, (float)r.w, (float)r.h, radius, blur, dy, col);
+        s->w = r.w; s->h = r.h; s->pad = pad; s->r = radius; s->blur = blur; s->dy = dy; s->col = col;
+    }
+    gfx_blit(dst, r.x - s->pad, r.y - s->pad, &s->c, 255);
+}
+
+typedef struct { rect_t r; bool ok, shown, leaving; canvas_t cache; int level; uint64_t t0; shadow_t sh; } glass_el_t;
 static glass_el_t g_dock, g_tray, g_menu, g_cal, g_pop, g_toast, g_osd, g_avatar, g_hint;
 
 /* transitions plein écran : l'ancienne image (snap) s'efface par-dessus la nouvelle */
@@ -47,6 +61,9 @@ static uint64_t trans_t0;
 
 /* déplacement / redimensionnement */
 enum { DR_NONE, DR_MOVE, DR_SIZE };
+static bool glass_stale;                   /* verres figés pendant un déplacement de fenêtre */
+static uint64_t last_drag_move;
+static bool glass_frozen(void);
 static int drag_kind, drag_dx, drag_dy;
 static window_t *drag_win;
 static rect_t drag_start;
@@ -610,7 +627,7 @@ static void draw_glass_ex(glass_el_t *e, rect_t r, float radius, int kind, float
         scene.clip = old;
         e->ok = true;
     }
-    if (shadow > 0) gfx_shadow(T, r.x, r.y, r.w, r.h, radius, shadow, shadow / 4, shadow_col);
+    if (shadow > 0) draw_shadow(T, &e->sh, r, radius, shadow, shadow / 4, shadow_col);
     gfx_blit(T, r.x, r.y, &e->cache, 255);
 }
 static void draw_glass(glass_el_t *e, rect_t r, float radius, int kind) { draw_glass_ex(e, r, radius, kind, 0, 0); }
@@ -678,10 +695,11 @@ static void draw_win_button(window_t *w, int b, bool active) {
 }
 
 static window_t *cur_win;
+static shadow_t win_shadow[MAX_WIN];
 static void draw_window_body(void) {
     window_t *w = cur_win;
     bool active = w == focused;
-    gfx_shadow(T, w->r.x, w->r.y, w->r.w, w->r.h, WIN_R, active ? 34 : 24, 10, active ? 0x70000000 : 0x50000000);
+    draw_shadow(T, &win_shadow[w - wins], w->r, WIN_R, active ? 34 : 24, 10, active ? 0x70000000 : 0x50000000);
     gfx_blit(T, w->r.x, w->r.y, &w->glass, 255);
     gfx_fill(T, R(w->r.x + 1, w->r.y + TITLE_H - 1, w->r.w - 2, 1), 0x18FFFFFF);
     draw_icon(T, w->icon, w->r.x + 14, w->r.y + 11, 22);
@@ -708,7 +726,25 @@ static void draw_window(window_t *w) {
     else if (w->anim == A_CLOSE) { float p = progress(w->anim_t0, T_WIN_OUT); a = 1 - ease_in(p); dy = (int)(p * 12); }
     else if (w->anim == A_MIN) { float p = progress(w->anim_t0, T_MIN); a = 1 - ease_in(p); dy = (int)(ease_in(p) * 80); }
     cur_win = w;
-    with_layer(win_outer(w), a, dy, draw_window_body);
+    if (!w->anim || a >= 0.997f) { with_layer(win_outer(w), a, dy, draw_window_body); return; }
+    /* animation : la fenêtre est dessinée une fois dans un calque à part, puis seulement
+     * posée avec sa transparence et son décalage à chaque image */
+    static canvas_t wl;
+    static window_t *wl_win;
+    static uint64_t wl_t0;
+    static rect_t wl_r;
+    rect_t area = rect_isect(win_outer(w), R(0, 0, scr_w, scr_h));
+    if (wl.w != scr_w || wl.h != scr_h) { canvas_free(&wl); wl = canvas_new(scr_w, scr_h); wl_win = NULL; }
+    if (wl_win != w || wl_t0 != w->anim_t0 || wl_r.x != w->r.x || wl_r.y != w->r.y || wl_r.w != w->r.w || wl_r.h != w->r.h) {
+        canvas_clip(&wl, area);
+        canvas_clear(&wl, 0);
+        canvas_t *old = T;
+        T = &wl;
+        draw_window_body();
+        T = old;
+        wl_win = w; wl_t0 = w->anim_t0; wl_r = w->r;
+    }
+    gfx_blit_rect(&scene, area.x, area.y + dy, &wl, area, (int)(a * 255));
 }
 
 static void draw_dock_body(void) {
@@ -1035,7 +1071,8 @@ static void compose(void) {
         glass_el_t *gl[8];
         int ng;
         collect_glass(gl, &ng);
-        for (int k = 0; k < ndmg; k++) {
+        bool frozen = glass_frozen();
+        for (int k = 0; k < ndmg && !frozen; k++) {
             for (int i = 0; i < zn; i++) {
                 window_t *w = &wins[zord[i]];
                 if (!w->minimized && dmg[k].level < 1 + i && rect_hits(dmg[k].r, rect_grow(w->r, M))) w->glass_ok = false;
@@ -1395,7 +1432,12 @@ static void mouse_button(const event_t *e) {
 static void motion(void) {
     if (drag_kind == DR_MOVE && alive(drag_win)) {
         int nx = mx - drag_dx, ny = CLAMP(my - drag_dy, 0, scr_h - 60);
+        bool had = drag_win->glass_ok;
         set_rect(drag_win, R(nx, ny, drag_win->r.w, drag_win->r.h));
+        /* pendant le déplacement, le verre garde l'image déjà calculée : il est recalculé
+         * dès que la fenêtre s'arrête un instant ou qu'on la lâche */
+        if (had) { drag_win->glass_ok = true; glass_stale = true; }
+        last_drag_move = now;
         return;
     }
     if (drag_kind == DR_SIZE && alive(drag_win)) {
@@ -1571,9 +1613,20 @@ void core_start(void) {
 }
 
 static void poll_hardware(void) {
-    static uint64_t next;
+    static uint64_t next, next_update;
+    static int last_upd = UPD_IDLE;
     if (now < next) return;
     next = now + 2500;
+    /* mises à jour : recherche 90 s après le démarrage puis toutes les 6 heures */
+    if (!next_update) next_update = now + 90000;
+    if (now >= next_update) { next_update = now + 6ull * 3600 * 1000; plat_update_check(true); }
+    char um[160];
+    int us = plat_update_state(um, sizeof um, NULL);
+    if (us != last_upd) {
+        if (us == UPD_DOWNLOADING && last_upd == UPD_CHECKING) wm_toast("Une mise à jour de TitanOs est en cours de téléchargement.");
+        if (us == UPD_DONE) wm_toast(um);
+        last_upd = us;
+    }
     battery_t b;
     plat_battery(&b);
     char ssid[33] = { 0 };
@@ -1599,8 +1652,17 @@ static void poll_hardware(void) {
     if (changed) damage(rect_grow(tray_rect(), 30), mode == MODE_DESK ? 100 : 0);
 }
 
+static bool glass_frozen(void) { return drag_kind == DR_MOVE && alive(drag_win) && now - last_drag_move < 120; }
+
 int core_frame(void) {
     now = plat_ms();
+    /* fin d'un déplacement (pause ou bouton lâché) : les verres se remettent à jour */
+    if (glass_stale && !glass_frozen()) {
+        glass_stale = false;
+        for (int i = 0; i < zn; i++) wins[zord[i]].glass_ok = false;
+        g_dock.ok = g_tray.ok = g_menu.ok = g_cal.ok = g_pop.ok = g_toast.ok = g_osd.ok = false;
+        damage_all();
+    }
     bool anim = false;
     if (mode == MODE_SPLASH) {
         damage(spinner_rect(), 0);
@@ -1654,6 +1716,7 @@ int core_frame(void) {
     if (dock_moving) { damage(rect_grow(dock_rect(), 20), 100); anim = true; }
     if (trans) { damage_all(); anim = true; }
     int wait = anim ? 16 : 500;
+    if (glass_stale) wait = MIN(wait, 130);
     for (int i = 0; i < MAX_WIN; i++) {
         window_t *w = &wins[i];
         if (alive(w) && w->tick) { w->tick(w, now); wait = MIN(wait, 15); }
@@ -1673,3 +1736,6 @@ int core_frame(void) {
     if (g_toast.shown || g_osd.shown) wait = MIN(wait, 100);
     return wait;
 }
+
+/* position de la fenêtre active (aperçu et tests) */
+rect_t wm_focused_rect(void) { return alive(focused) ? focused->r : R(0, 0, 0, 0); }

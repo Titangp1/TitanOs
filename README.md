@@ -1,4 +1,4 @@
-# TitanOs — bêta 5
+# TitanOs — bêta 6
 
 Système d'exploitation **léger** sur base Linux, avec un bureau **liquid glass** écrit en C,
 sans bibliothèque, et pensé pour le **Sony VAIO série F** (Core i7, GeForce GT 330M).
@@ -33,15 +33,25 @@ Terminal), `wpa_supplicant` (Wi-Fi), `apk` (installer des applications) et `mke2
   - bouton d'alimentation, qui propose d'éteindre ;
   - températures du processeur et de la carte NVIDIA, fréquence du processeur.
 - **Wi-Fi** (Intel Centrino 6200 ou Atheros AR9287 du VAIO) : liste des réseaux, mot de passe,
-  réseaux enregistrés. Aussi l'**Ethernet** (Marvell Yukon) et le **partage de connexion USB** d'un téléphone.
+  réseaux enregistrés. Si l'interrupteur **WIRELESS** du VAIO (bord avant) est sur OFF, l'application
+  Réseau le signale. Aussi l'**Ethernet** (Marvell Yukon) et le **partage de connexion USB** d'un téléphone.
 - **Applications Linux** : `apk add htop` dans le Terminal installe un programme d'Alpine. Au premier
   démarrage, TitanOs crée un espace pour les applications dans la place libre de la clé : elles y restent
   installées.
 - Vos fichiers et réglages sont gardés sur la clé, dans `Utilisateur/` et `titanos.cfg`.
+- **Mises à jour automatiques** : une fois connecté à Internet, TitanOs regarde s'il existe une version plus
+  récente dans les [versions publiées](../../releases) sur GitHub. Si oui, il la télécharge, vérifie ses sommes
+  SHA-256 et l'installe tout seul ; il suffit ensuite de redémarrer. L'application **Mises à jour** permet aussi
+  de lancer la recherche.
+- **Installation sur le disque** : depuis la clé, l'application **Mises à jour** copie TitanOs sur le disque
+  interne choisi, après confirmation. **Tout le disque est effacé** (Windows compris). Ensuite, l'ordinateur
+  démarre sans la clé.
 
 ![Réseau et Wi-Fi](docs/captures/reseau.png)
 
 ![Système](docs/captures/systeme.png)
+
+![Mises à jour](docs/captures/mises-a-jour.png)
 
 ### Applications
 
@@ -54,13 +64,14 @@ Terminal), `wpa_supplicant` (Wi-Fi), `apk` (installer des applications) et `mke2
 | **Paramètres** | fond, couleur, verre, nom, secondes ; clavier FR/US, pointeur, luminosité, volume, sons, fuseau horaire, heure Internet |
 | **Système** | machine, températures, batterie, matériel PCI/USB avec son pilote, processus |
 | **Réseau** | Wi-Fi, câble, partage USB, test de connexion |
+| **Mises à jour** | version installée, mises à jour depuis GitHub, installation sur le disque interne |
 | **Snake**, **À propos** | |
 
 Raccourcis : touche Windows (menu et recherche), Alt+Tab, Alt+F4, Ctrl+Alt+T (Terminal), Windows+L (verrouiller).
 
 ## Installer sur une clé USB
 
-1. Télécharger `titanos-beta5.img.zip` dans les [versions publiées](../../releases), puis le décompresser.
+1. Télécharger `titanos-beta6.img.zip` dans les [versions publiées](../../releases), puis le décompresser.
 2. Écrire `titanos.img` sur une clé USB avec **Rufus, en mode DD**. Cela efface la clé.
    Prenez une clé d'au moins 2 Go : la place libre accueillera les applications.
 3. **Sony VAIO (BIOS)** : touche F2, onglet Boot, activer **External Device Boot** et mettre la clé
@@ -142,11 +153,12 @@ boot/                 MBR, chargeur BIOS (stage2.S), chargeur UEFI (efiboot.c)
 src/core/             le bureau, indépendant du système
   gfx.c glass.c icons.c   dessin lissé, verre, logo et icônes
   wm.c ui.c sound.c       fenêtres, dock, menus, animations, widgets, sons
-  apps.c term.c files.c notes.c prefs.c sysapp.c netapp.c   applications
+  apps.c term.c files.c notes.c prefs.c sysapp.c netapp.c updapp.c   applications
 src/linux/            ce qui parle au noyau (appels système directs, sans libc)
   main.c                  /init, démarrage, clé, espace des applications
   modules.c display.c input.c   pilotes, écran DRM/KMS, clavier/souris/pavé tactile
   audio.c wifi.c plat.c         son ALSA, Wi-Fi (wpa_supplicant), fichiers, système, batterie
+  update.c                      mises à jour depuis GitHub, installation sur le disque
 src/sim/sim.c         version Windows du bureau, pour l'aperçu
 rootfs/etc/           profil du shell, script DHCP, dépôts apk
 tools/                téléchargement Alpine, polices, initramfs, image disque, écran de démarrage, tests
@@ -160,6 +172,20 @@ tools/                téléchargement Alpine, polices, initramfs, image disque,
 - **Sur la clé**, dès qu'elle est trouvée, TitanOs écrit `journal-titanos.txt` toutes les 5 secondes
   pendant 4 minutes : messages du noyau, pilotes, périphériques, et l'endroit où chaque processus attend.
   Branchez la clé sur Windows et envoyez ce fichier.
+
+## Nouveautés de la bêta 6
+
+- **Fluidité** : les ombres sont gardées en image et le verre n'est recalculé que là où c'est utile. Pendant
+  qu'on déplace une fenêtre, son verre reste figé et se remet à jour dès qu'elle s'arrête : environ 5 fois moins
+  de calcul par image. Le processeur passe en pleine vitesse sur secteur.
+- **Son** : la sortie analogique est cherchée directement auprès des pilotes, et chaque échec est noté dans
+  le journal.
+- **Wi-Fi** : l'interrupteur WIRELESS du VAIO est détecté et expliqué.
+- **Écran de démarrage** : le chargeur lit la résolution native de l'écran (EDID) et choisit un mode de même
+  format quand le BIOS en propose un, au lieu du plus grand.
+- **Mises à jour automatiques** depuis GitHub et **installation sur le disque interne**.
+- Le chargeur transmet à Linux la signature du disque qui a démarré : avec une clé et un disque TitanOs,
+  c'est le bon qui est utilisé.
 
 ## Nouveautés de la bêta 5
 
@@ -190,10 +216,11 @@ tools/                téléchargement Alpine, polices, initramfs, image disque,
   - le chargeur BIOS démarre Linux dans l'émulateur et dessine bien l'écran de démarrage ;
   - le bureau, les animations et les applications sont rendus et pilotés dans l'aperçu Windows ;
   - le programme Linux et le chargeur UEFI se compilent sans erreur.
-- **Essayé sur le VAIO (bêtas 1 et 2)** : le démarrage et son animation fonctionnent ; l'écran de
-  verrouillage restait figé. La bêta 4 a donné la cause, corrigée dans la bêta 5.
+- **Essayé sur le VAIO (bêtas 1 à 5)** : depuis la bêta 5, le bureau, la clé, le clavier, le pavé tactile et
+  la carte NVIDIA (1920×1080) fonctionnent.
 - **À tester sur le VAIO** :
-  - l'écran de verrouillage et le bureau ;
+  - la fluidité, le son, le Wi-Fi (interrupteur sur ON) ;
+  - l'installation sur le disque et la première mise à jour automatique ;
   - le Wi-Fi, le son, la batterie et les touches Fn ;
   - la création de l'espace des applications sur la clé ;
   - le chargeur UEFI.

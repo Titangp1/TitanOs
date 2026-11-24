@@ -12,16 +12,27 @@
 
 /* ---------------- choix de la carte : la sortie analogique, pas le HDMI ---------------- */
 static int find_pcm(int *card_out, int *dev_out) {
-    for (int c = 0; c < 4; c++)
-        for (int d = 0; d < 8; d++) {
-            char p[64], info[512];
-            snprintf(p, sizeof p, "/proc/asound/card%d/pcm%dp/info", c, d);
-            if (read_file(p, info, sizeof info) <= 0) continue;
-            if (strstr(info, "HDMI") || strstr(info, "hdmi")) continue;
+    /* on interroge directement chaque sortie (/dev/snd/pcmCxDyp) : pas besoin de /proc */
+    for (int c = 0; c < 8; c++)
+        for (int d = 0; d < 16; d++) {
+            char p[48];
+            snprintf(p, sizeof p, "/dev/snd/pcmC%dD%dp", c, d);
+            int fd = sys_open(p, O_RDWR | O_NONBLOCK | O_CLOEXEC, 0);
+            if (fd < 0) continue;
+            struct snd_pcm_info info;
+            memset(&info, 0, sizeof info);
+            long r = sys_ioctl(fd, SNDRV_PCM_IOCTL_INFO, &info);
+            sys_close(fd);
+            const char *id = (const char *)info.id, *nm = (const char *)info.name;
+            if (r < 0 || strstr(id, "HDMI") || strstr(nm, "HDMI") || strstr(id, "hdmi")) continue;
+            static bool told;
+            if (!told) { told = true; klog("son : carte %d, sortie %d (%s)", c, d, nm); }
             *card_out = c;
             *dev_out = d;
             return 0;
         }
+    static bool warned;
+    if (!warned) { warned = true; klog("son : aucune sortie analogique trouvée"); }
     return -1;
 }
 
@@ -62,7 +73,7 @@ static int pcm_open(void) {
     char path[48];
     snprintf(path, sizeof path, "/dev/snd/pcmC%dD%dp", card, dev);
     int fd = sys_open(path, O_RDWR | O_CLOEXEC, 0);
-    if (fd < 0) return -1;
+    if (fd < 0) { klog("son : ouverture de %s impossible (%d)", path, fd); return -1; }
     struct snd_pcm_hw_params hw;
     hw_init(&hw);
     hw_mask(&hw, SNDRV_PCM_HW_PARAM_ACCESS, SNDRV_PCM_ACCESS_RW_INTERLEAVED);
@@ -74,7 +85,8 @@ static int pcm_open(void) {
     hw_int(&hw, SNDRV_PCM_HW_PARAM_CHANNELS, 2);
     hw_int(&hw, SNDRV_PCM_HW_PARAM_PERIODS, 4);
     hw_int(&hw, SNDRV_PCM_HW_PARAM_RATE, RATE);
-    if (sys_ioctl(fd, SNDRV_PCM_IOCTL_HW_PARAMS, &hw) < 0) { klog("son : réglage de %s impossible", path); sys_close(fd); return -1; }
+    long hr = sys_ioctl(fd, SNDRV_PCM_IOCTL_HW_PARAMS, &hw);
+    if (hr < 0) { klog("son : réglage de %s impossible (%ld)", path, hr); sys_close(fd); return -1; }
     unsigned period = pint(&hw, SNDRV_PCM_HW_PARAM_PERIOD_SIZE)->min;
     unsigned buffer = pint(&hw, SNDRV_PCM_HW_PARAM_BUFFER_SIZE)->min;
     struct snd_pcm_sw_params sw;
@@ -227,7 +239,7 @@ static bool mixer_open(void) {
     char p[48];
     snprintf(p, sizeof p, "/dev/snd/controlC%d", card);
     int fd = sys_open(p, O_RDWR | O_CLOEXEC, 0);
-    if (fd < 0) return false;
+    if (fd < 0) { klog("son : mixeur %s introuvable (%d)", p, fd); return false; }
     /* tout est réglé au maximum sauf Master, qui sert de volume général */
     static const char *const unmute[] = { "Speaker Playback Switch", "Headphone Playback Switch", "PCM Playback Switch", "Front Playback Switch" };
     static const char *const full[] = { "Speaker Playback Volume", "Headphone Playback Volume", "PCM Playback Volume", "Front Playback Volume" };
@@ -241,7 +253,8 @@ static bool mixer_open(void) {
         if (!has_master && !master_vol.ok) { master_vol = c; continue; }   /* pas de Master : PCM fait office */
         ctl_set(fd, &c, c.max);
     }
-    if (!master_vol.ok) { sys_close(fd); return false; }
+    if (!master_vol.ok) { klog("son : pas de réglage de volume sur %s", p); sys_close(fd); return false; }
+    klog("son : volume réglé par « %s »", (const char *)master_vol.id.name);
     mixer_fd = fd;
     return true;
 }

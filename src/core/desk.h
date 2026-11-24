@@ -6,12 +6,12 @@
 /* ---------------- icônes (icons.c) ---------------- */
 enum {
     ICON_FILES, ICON_TERMINAL, ICON_NOTES, ICON_CALC, ICON_SETTINGS, ICON_SYSTEM,
-    ICON_NETWORK, ICON_SNAKE, ICON_ABOUT,                     /* les applications */
+    ICON_NETWORK, ICON_SNAKE, ICON_ABOUT, ICON_UPDATE,        /* les applications */
     ICON_FOLDER, ICON_FILE, ICON_IMAGE, ICON_LOCK, ICON_REBOOT, ICON_POWER,
     ICON_HOME, ICON_USB, ICON_DISK, ICON_SEARCH, ICON_WIFI, ICON_ETHERNET, ICON_VOLUME, ICON_MUTE,
     ICON_BATTERY, ICON_BRIGHTNESS, ICON_COUNT
 };
-#define APP_COUNT 9
+#define APP_COUNT 10
 const char *app_name(int icon);
 void        app_open(int icon);
 void        draw_wifi(canvas_t *c, float cx, float cy, float s, int level, uint32_t col, uint32_t dim);  /* level 0-4 */
@@ -147,3 +147,4 @@ void app_system_open(void);
 void app_network_open(void);
 void app_snake_open(void);
 void app_about_open(void);
+void app_update_open(void);

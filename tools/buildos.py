@@ -10,6 +10,7 @@
   5. écrit l'image disque (FAT32 « TITANOS ») et sa version VHD.
 """
 import gzip
+import re
 import hashlib
 import os
 import struct
@@ -45,7 +46,7 @@ MODULES = [
 ]
 
 # Programmes d'Alpine embarqués (avec leurs bibliothèques)
-PACKAGES = ["wpa_supplicant", "e2fsprogs", "apk-tools-static", "alpine-keys", "ca-certificates-bundle",
+PACKAGES = ["wpa_supplicant", "e2fsprogs", "apk-tools-static", "alpine-keys", "ca-certificates-bundle", "ssl_client",
             "wireless-regdb"]
 
 # Micrologiciels téléchargés séparément (miroir officiel de linux-firmware), vérifiés par leur SHA-256
@@ -65,6 +66,34 @@ def norm(name):
 def modname(path):
     b = path.rsplit("/", 1)[-1]
     return norm(b.split(".ko")[0])
+
+
+def write_update(out, info, s2, kernel, initrd, bimg):
+    """Paquet de mise à jour publié avec chaque version (titanos-maj.tar.gz).
+
+    TitanOs le télécharge, vérifie les sommes SHA-256, puis réécrit sur place les fichiers
+    du système (ils ont une place fixe sur le disque) et le chargeur BIOS."""
+    import hashlib
+    import io
+    import tarfile
+    import mkimage
+    build = re.search(r'#define TITANOS_BUILD\s+(\d+)', open(os.path.join(os.path.dirname(out), "src", "core", "base.h"),
+                                                         encoding="utf-8").read()).group(1)
+    files = {"VERSION": (build + "\n").encode(), "mbr.bin": info["mbr_code"], "stage2.bin": s2,
+             "VMLINUZ": kernel, "INITRD.IMG": initrd, "BOOT.IMG": bimg, "BOOTX64.EFI": info["efi"],
+             "TAILLES": mkimage.sizes_file(kernel, initrd, bimg)}
+    sums = "".join(f"{hashlib.sha256(d).hexdigest()}  {n}\n" for n, d in files.items())
+    files["SHA256SUMS"] = sums.encode()
+    path = os.path.join(out, "titanos-maj.tar.gz")
+    with tarfile.open(path, "w:gz", compresslevel=9) as tar:
+        for n, d in files.items():
+            ti = tarfile.TarInfo(n)
+            ti.size = len(d)
+            ti.mtime = 0
+            tar.addfile(ti, io.BytesIO(d))
+    with open(os.path.join(out, "VERSION"), "w", newline="\n") as f:
+        f.write(build + "\n")
+    print(f"  mise à jour : build/titanos-maj.tar.gz ({os.path.getsize(path) >> 20} Mo, version {build})")
 
 
 def select_modules(files, kver):
@@ -313,7 +342,7 @@ def build(repo, B):
 
     print("[image disque]")
     import mkimage
-    readme = ("TitanOs beta 5 - systeme d'exploitation sur base Linux\r\n\r\n"
+    readme = ("TitanOs beta 6 - systeme d'exploitation sur base Linux\r\n\r\n"
               "TITANOS\\VMLINUZ     noyau Linux\r\n"
               "TITANOS\\INITRD.IMG  systeme TitanOs (bureau, pilotes, BusyBox)\r\n"
               "EFI\\BOOT\\BOOTX64.EFI chargeur UEFI (Secure Boot desactive)\r\n"
@@ -326,8 +355,9 @@ def build(repo, B):
                                           os.path.join(out, "titanos.vhd"))
     with open(os.path.join(out, "obj-boot", "stage2-final.bin"), "wb") as f:
         f.write(s2)
+    write_update(out, info, s2, vmlinuz, initrd, bootimg.build(ttc))
     print(f"  noyau au secteur {info['kernel_lba']}, initramfs au secteur {info['initrd_lba']}, "
           f"chargé à {info['initrd_addr'] >> 20} Mo ; {info['free_mb']} Mo libres pour vos fichiers")
-    print(f"\nTitanOs bêta 5 est prêt :")
+    print(f"\nTitanOs bêta 6 est prêt :")
     print(f"  build/titanos.img   image pour clé USB ({DISK_MB} Mo, démarre en BIOS et en UEFI)")
     print(f"  build/titanos.vhd   disque virtuel (VirtualBox, Hyper-V génération 1)")

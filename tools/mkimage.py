@@ -15,6 +15,10 @@ Disque hybride, démarrable en UEFI *et* en BIOS classique :
 
 Les fichiers sont écrits d'un seul tenant : le chargeur BIOS les lit directement par
 leurs numéros de secteurs.
+
+Mises à jour : les fichiers du système ont une taille fixe (PADDED), complétée de zéros.
+Ils sont donc toujours aux mêmes secteurs d'une version à l'autre, et TitanOs peut les
+réécrire sur place. TITANOS/TAILLES donne leur taille utile au chargeur UEFI.
 """
 import struct
 import time
@@ -25,6 +29,21 @@ PART_START = 2048
 STAGE2_LBA = 1
 STAGE2_MAX = 64
 SPC = 4                      # secteurs par cluster (2 Ko)
+# taille réservée à chaque fichier du système : à ne JAMAIS changer, sinon les versions
+# déjà installées ne pourront plus se mettre à jour (les fichiers changeraient de place)
+PADDED = {"EFI/BOOT/BOOTX64.EFI": 1 << 20, "TITANOS/VMLINUZ": 32 << 20, "TITANOS/INITRD.IMG": 64 << 20,
+          "TITANOS/BOOT.IMG": 2 << 20, "TITANOS/TAILLES": 4096}
+
+
+def pad(path, data):
+    n = PADDED[path]
+    if len(data) > n:
+        raise ValueError(f"{path} dépasse la place réservée ({len(data)} > {n} octets)")
+    return bytes(data) + bytes(n - len(data))
+
+
+def sizes_file(kernel, initrd, bootimg):
+    return f"{len(kernel)} {len(initrd)} {len(bootimg)}\n".encode()
 
 
 def fat_datetime():
@@ -182,15 +201,18 @@ def build_disk(disk_mb, efi, mbr_code, stage2, kernel, initrd, cmdline, readme, 
     efi[m:m + len(ucmd)] = ucmd
 
     tree = {
-        "EFI": {"BOOT": {"BOOTX64.EFI": bytes(efi)}},
-        "TITANOS": {"VMLINUZ": kernel, "INITRD.IMG": initrd, "BOOT.IMG": bootimg},
+        "EFI": {"BOOT": {"BOOTX64.EFI": pad("EFI/BOOT/BOOTX64.EFI", efi)}},
+        "TITANOS": {"VMLINUZ": pad("TITANOS/VMLINUZ", kernel), "INITRD.IMG": pad("TITANOS/INITRD.IMG", initrd),
+                    "BOOT.IMG": pad("TITANOS/BOOT.IMG", bootimg),
+                    "TAILLES": pad("TITANOS/TAILLES", sizes_file(kernel, initrd, bootimg))},
         "LISEZMOI.TXT": readme,
     }
     fat = Fat32(part_sectors, PART_START)
     fs = fat.build(tree)
-    kc, ksize = fat.placed["TITANOS/VMLINUZ"]
-    ic, isize = fat.placed["TITANOS/INITRD.IMG"]
-    bc, bsize = fat.placed["TITANOS/BOOT.IMG"]
+    kc, _ = fat.placed["TITANOS/VMLINUZ"]
+    ic, _ = fat.placed["TITANOS/INITRD.IMG"]
+    bc, _ = fat.placed["TITANOS/BOOT.IMG"]
+    ksize, isize, bsize = len(kernel), len(initrd), len(bootimg)
 
     # chargeur BIOS : emplacement des fichiers et zero page
     s2 = bytearray(stage2)
@@ -226,7 +248,8 @@ def build_disk(disk_mb, efi, mbr_code, stage2, kernel, initrd, cmdline, readme, 
     mbr[510:512] = b"\x55\xAA"
     disk[0:SECTOR] = mbr
     disk[STAGE2_LBA * SECTOR:STAGE2_LBA * SECTOR + len(s2)] = s2
-    info = {"kernel_lba": fat.lba_of(kc), "initrd_lba": fat.lba_of(ic), "initrd_addr": initrd_addr,
+    info = {"kernel_lba": fat.lba_of(kc), "initrd_lba": fat.lba_of(ic), "bimg_lba": fat.lba_of(bc), "initrd_addr": initrd_addr,
+            "efi": bytes(efi), "mbr_code": bytes(mbr[:440]),
             "init_size": init_size, "free_mb": (fat.clusters + 2 - fat.next) * fat.csize() >> 20}
     return disk, bytes(s2), info
 
@@ -295,7 +318,7 @@ def read_back(disk, path):
 
 def write_images(disk_mb, efi, mbr_code, stage2, kernel, initrd, cmdline, readme, bootimg, img_path, vhd_path=None):
     disk, s2, info = build_disk(disk_mb, efi, mbr_code, stage2, kernel, initrd, cmdline, readme, bootimg)
-    if read_back(disk, "TITANOS/VMLINUZ") != kernel or read_back(disk, "TITANOS/INITRD.IMG") != initrd:
+    if read_back(disk, "TITANOS/VMLINUZ")[:len(kernel)] != kernel or read_back(disk, "TITANOS/INITRD.IMG")[:len(initrd)] != initrd:
         raise SystemExit("échec de la vérification de l'image")
     if disk[info["kernel_lba"] * SECTOR:info["kernel_lba"] * SECTOR + 1024] != kernel[:1024]:
         raise SystemExit("échec de la vérification : le noyau n'est pas là où l'attend le chargeur BIOS")

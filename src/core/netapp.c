@@ -55,6 +55,7 @@ static void net_draw(window_t *w, canvas_t *c) {
     if (s->wstate == WIFI_NONE) strlcpy(st, "Aucune carte Wi-Fi utilisable", sizeof st);
     else if (s->wstate == WIFI_CONNECTED) snprintf(st, sizeof st, "Connecté à « %s »", s->wssid);
     else if (s->wstate == WIFI_CONNECTING) strlcpy(st, "Connexion en cours…", sizeof st);
+    else if (s->wstate == WIFI_BLOCKED) strlcpy(st, "Radio coupée par l'interrupteur", sizeof st);
     else strlcpy(st, "Non connecté", sizeof st);
     text_draw(c, &font_small, 58, 36, st, s->wstate == WIFI_CONNECTED ? 0xFF86EFAC : C_MUTED);
     if (s->wstate != WIFI_NONE) ui_button(c, refresh_rect(c), "Actualiser", BTN_NORMAL, s->hover == H_REFRESH);
@@ -66,7 +67,10 @@ static void net_draw(window_t *w, canvas_t *c) {
     int vis = (L.h - 8) / ROW_H;
     if (s->wstate == WIFI_NONE)
         text_center(c, &font_body, R(L.x, L.y + 20, L.w, 24), "Branchez un câble Ethernet ou partagez la connexion d'un téléphone en USB.", C_MUTED);
-    else if (!s->nnets)
+    else if (s->wstate == WIFI_BLOCKED) {
+        text_center(c, &font_body, R(L.x, L.y + 20, L.w, 24), "Le Wi-Fi est coupé par l'interrupteur de l'ordinateur.", C_TEXT);
+        text_center(c, &font_body, R(L.x, L.y + 46, L.w, 24), "Sur le VAIO : glissez l'interrupteur WIRELESS (bord avant) sur ON.", C_MUTED);
+    } else if (!s->nnets)
         text_center(c, &font_body, R(L.x, L.y + 20, L.w, 24), "Recherche des réseaux…", C_MUTED);
     for (int i = s->scroll; i < s->nnets && i < s->scroll + vis + 1; i++) {
         wifi_net_t *n = &s->nets[i];

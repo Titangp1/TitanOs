@@ -22,6 +22,7 @@
 #define CHUNK       127
 #define VBE_INFO    0x7000
 #define MODE_INFO   0x7200
+#define EDID_BUF    0x6E00
 #define E820_TMP    0x6F00
 #define ZP_E820N    0x1E8
 #define ZP_E820     0x2D0
@@ -51,6 +52,7 @@ real_start:
     sti
     cld
     movb    %dl, drive
+    call    add_disk_arg
 
     movw    $m_hello, %si
     call    print
@@ -293,6 +295,35 @@ setup_video:
     int     $0x10
     cmpw    $0x004F, %ax
     jne     vbe_fail
+    /* résolution native de l'écran (EDID) : on préférera un mode de même format */
+    pushw   %es
+    movw    $0x4F15, %ax
+    movw    $0x0001, %bx
+    xorw    %cx, %cx
+    xorw    %dx, %dx
+    movw    $EDID_BUF, %di
+    int     $0x10
+    popw    %es
+    cmpw    $0x004F, %ax
+    jne     1f
+    movzbl  EDID_BUF + 56, %eax
+    movzbl  EDID_BUF + 58, %ecx
+    andl    $0xF0, %ecx
+    shll    $4, %ecx
+    orl     %ecx, %eax
+    movl    %eax, native_w
+    movzbl  EDID_BUF + 59, %eax
+    movzbl  EDID_BUF + 61, %ecx
+    andl    $0xF0, %ecx
+    shll    $4, %ecx
+    orl     %ecx, %eax
+    movl    %eax, native_h
+    cmpl    $320, native_w              /* valeurs absurdes : on les ignore */
+    jb      0f
+    cmpl    $200, native_h
+    jae     1f
+0:  movl    $0, native_w
+1:
     movw    VBE_INFO + 14, %ax
     movw    %ax, mode_off
     movw    VBE_INFO + 16, %ax
@@ -328,8 +359,33 @@ vm_next:
     ja      vm_next
     cmpl    $480, %ebx
     jb      vm_next
+    /* note : la surface, + 2^30 si c'est la résolution native, + 2^29 si même format */
+    movl    %eax, %esi
+    movl    %ebx, %edi
     imull   %ebx, %eax
-    cmpl    best_area, %eax
+    cmpl    $0, native_w
+    je      2f
+    cmpl    native_w, %esi
+    jne     3f
+    cmpl    native_h, %edi
+    jne     3f
+    addl    $0x40000000, %eax
+    jmp     2f
+3:  pushl   %eax
+    movl    %esi, %eax
+    imull   native_h, %eax              /* largeur x hauteur native */
+    movl    %eax, %ecx
+    movl    %edi, %edx
+    imull   native_w, %edx              /* hauteur x largeur native */
+    subl    %edx, %eax
+    jns     4f
+    negl    %eax
+4:  shll    $5, %eax                    /* écart de format inférieur à 1/32 */
+    cmpl    %ecx, %eax
+    popl    %eax
+    ja      2f
+    addl    $0x20000000, %eax
+2:  cmpl    best_area, %eax
     jbe     vm_next
     movl    %eax, best_area
     movw    cur_mode, %ax
@@ -672,6 +728,35 @@ spin_update:
     call    blit_a
 9:  ret
 
+/* ajoute « titanos.disk=xxxxxxxx » à la ligne de commande : la signature du disque qui a
+ * démarré (MBR, octet 440). Linux reconnaît ainsi la bonne copie de TitanOs quand il y en
+ * a plusieurs (clé USB et disque interne). */
+add_disk_arg:
+    movw    $cmdline, %di
+1:  cmpb    $0, (%di)
+    je      2f
+    incw    %di
+    jmp     1b
+2:  movw    $m_diskarg, %si
+3:  lodsb
+    testb   %al, %al
+    jz      4f
+    stosb
+    jmp     3b
+4:  movl    0x7DB8, %edx                /* signature du MBR chargé par le BIOS (0x7C00 + 440) */
+    movw    $8, %cx
+5:  roll    $4, %edx
+    movb    %dl, %al
+    andb    $0x0F, %al
+    addb    $'0', %al
+    cmpb    $'9', %al
+    jbe     6f
+    addb    $39, %al                    /* a à f */
+6:  stosb
+    loop    5b
+    movb    $0, (%di)
+    ret
+
 /* ---------------- données ---------------- */
 drive:      .byte 0x80
 gfx_mode:   .byte 0                     /* mode graphique réglé et dessinable */
@@ -687,6 +772,8 @@ dots:       .word 0
 cur_frame:  .word 0xFFFF
     .balign 4
 best_area:  .long 0
+native_w:   .long 0
+native_h:   .long 0
 cur_lba:    .long 0
 left:       .long 0
 dest:       .long 0
@@ -717,7 +804,8 @@ gdtr:
     .word gdt_end - gdt - 1
     .long gdt
 
-m_hello:  .asciz "TitanOs beta 5 - demarrage BIOS\r\n"
+m_diskarg: .asciz " titanos.disk="
+m_hello:  .asciz "TitanOs beta 6 - demarrage BIOS\r\n"
 m_kernel: .asciz "  Noyau Linux "
 m_initrd: .asciz "  Systeme TitanOs "
 m_ok:     .asciz " OK\r\n"

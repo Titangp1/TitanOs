@@ -97,16 +97,53 @@ static bool is_titanos_volume(const char *dev) {
     return !memcmp(s + 71, "TITANOS    ", 11) || !memcmp(s + 43, "TITANOS    ", 11);
 }
 
+static bool disk_of(const char *part, char *disk, int n);
+
+/* signature du disque qui a démarré, donnée par le chargeur BIOS (titanos.disk=xxxxxxxx) */
+static const char *boot_sig(void) {
+    static char sig[16];
+    static bool done;
+    if (!done) {
+        done = true;
+        char cl[1024];
+        read_file("/proc/cmdline", cl, sizeof cl);
+        char *p = strstr(cl, "titanos.disk=");
+        if (p) { strlcpy(sig, p + 13, 9); if (strlen(sig) != 8) sig[0] = 0; }
+    }
+    return sig;
+}
+
+static bool disk_has_sig(const char *part, const char *sig) {
+    char disk[32], p[48];
+    if (!disk_of(part, disk, sizeof disk)) return false;
+    snprintf(p, sizeof p, "/dev/%s", disk);
+    int fd = sys_open(p, O_RDONLY | O_CLOEXEC, 0);
+    if (fd < 0) return false;
+    uint8_t s[512];
+    long n = sys_read(fd, s, sizeof s);
+    sys_close(fd);
+    if (n != 512) return false;
+    char hex[12];
+    snprintf(hex, sizeof hex, "%08x", (unsigned)(s[440] | s[441] << 8 | s[442] << 16 | (unsigned)s[443] << 24));
+    return !strcmp(hex, sig);
+}
+
 static char key_dev[32];
+static char other_dev[32];            /* un autre TitanOs (pas celui qui a démarré) */
 static void block_cb(const char *name, int type, void *ctx) {
     (void)type; (void)ctx;
     if (key_dev[0] || str_starts(name, "loop") || str_starts(name, "ram") || str_starts(name, "zram")) return;
-    if (is_titanos_volume(name)) strlcpy(key_dev, name, sizeof key_dev);
+    if (!is_titanos_volume(name)) return;
+    const char *sig = boot_sig();
+    if (sig[0] && !disk_has_sig(name, sig)) { strlcpy(other_dev, name, sizeof other_dev); return; }
+    strlcpy(key_dev, name, sizeof key_dev);
 }
 
 static bool mount_key(void) {
-    key_dev[0] = 0;
+    key_dev[0] = other_dev[0] = 0;
     for_each_dir("/sys/class/block", block_cb, NULL);
+    /* démarrage UEFI (pas de signature transmise) ou signature introuvable : la copie trouvée */
+    if (!key_dev[0] && other_dev[0]) strlcpy(key_dev, other_dev, sizeof key_dev);
     if (!key_dev[0]) return false;
     module_load("nls_cp437");
     module_load("nls_utf8");
@@ -323,7 +360,7 @@ static void prepare_home(bool on_key, const char *storage) {
     if (first) {
         char p[256];
         snprintf(p, sizeof p, "%s/Bienvenue.txt", home);
-        const char *t = "Bienvenue dans TitanOs (bêta 5) !\n\n"
+        const char *t = "Bienvenue dans TitanOs (bêta 6) !\n\n"
                         "TitanOs tourne sur le noyau Linux : Linux fournit les pilotes (écran, clavier,\n"
                         "USB, Wi-Fi, son...), et tout le reste est écrit pour TitanOs.\n\n"
                         "Vos fichiers sont gardés sur la clé USB, dans le dossier Utilisateur.\n"
@@ -446,11 +483,24 @@ static int session_main(void) {
     core_start();
     if (!on_key) wm_toast("Clé TITANOS introuvable : vos fichiers ne seront pas conservés.");
 
-    uint64_t next_scan = 0, next_net = 0;
+    uint64_t next_scan = 0, next_net = 0, next_stat = plat_ms() + 10000;
+    uint64_t st_frames = 0, st_us = 0, st_max = 0;
     for (;;) {
         struct pollfd pf[24];
         int n = input_fill_poll(pf, 24);
+        struct timespec t0, t1;
+        sys_clock_gettime(CLOCK_MONOTONIC, &t0);
         int wait = core_frame();
+        sys_clock_gettime(CLOCK_MONOTONIC, &t1);
+        uint64_t us = (uint64_t)(t1.tv_sec - t0.tv_sec) * 1000000 + (uint64_t)((t1.tv_nsec - t0.tv_nsec) / 1000);
+        if (us > 1000) { st_frames++; st_us += us; if (us > st_max) st_max = us; }
+        if (plat_ms() >= next_stat) {        /* mesure de fluidité, dans le journal */
+            if (st_frames) klog("images : %d en 10 s, %d ms en moyenne (max %d), dont envoi à l'écran %d ms",
+                                (int)st_frames, (int)(st_us / st_frames / 1000), (int)(st_max / 1000), (int)(display_us / st_frames / 1000));
+            st_frames = st_us = st_max = 0;
+            display_us = 0;
+            next_stat = plat_ms() + 10000;
+        }
         sys_poll(pf, n, wait);
         input_read(pf, n);
         plat_tick();
