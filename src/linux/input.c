@@ -259,6 +259,17 @@ static void add_dev(const char *name, int type, void *ctx) {
 
 void input_scan(void) { for_each_dir("/dev/input", add_dev, NULL); }
 
+int input_events;
+void input_describe(char *b, int n) {
+    int k = 0, m = 0, t = 0;
+    for (int i = 0; i < ndevs; i++) {
+        if (devs[i].kind & DEV_KBD) k++;
+        if (devs[i].kind & (DEV_MOUSE | DEV_ABS)) m++;
+        if (devs[i].kind & DEV_TOUCHPAD) t++;
+    }
+    snprintf(b, (size_t)n, "%d clavier%s, %d souris, %d pavé%s", k, k > 1 ? "s" : "", m, t, t > 1 ? "s" : "");
+}
+
 int input_fill_poll(struct pollfd *p, int max) {
     int n = 0;
     for (int i = 0; i < ndevs && n < max; i++) { p[n].fd = devs[i].fd; p[n].events = POLLIN; p[n].revents = 0; n++; }
@@ -417,6 +428,7 @@ void input_read(struct pollfd *p, int n) {
             }
             static bool seen;
             if (!seen) { seen = true; klog("entrée : premiers événements reçus"); }
+            input_events += (int)(r / (long)sizeof(struct input_event));
             for (int i = 0; i < (int)(r / (long)sizeof(struct input_event)); i++) handle(d, &evs[i]);
         }
     }

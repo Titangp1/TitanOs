@@ -236,6 +236,27 @@ static void say(const char *s) {
 }
 static void tell(const char *s) { sys_write(boot_out, s, strlen(s)); }
 
+/* Journal de diagnostic, copié sur la clé toutes les 5 s pendant les 4 premières minutes :
+ * messages du noyau, pilotes chargés, périphériques d'entrée et, pour chaque processus
+ * TitanOs, l'endroit où il attend dans le noyau. Il ne dépend pas du bureau : même si
+ * celui-ci se bloque, le journal continue. */
+static void start_journal(void) {
+    static const char script[] =
+        "J=/media/titanos/journal-titanos.txt; i=0; while [ $i -lt 48 ]; do {"
+        " echo \"TitanOs " TITANOS_VERSION " - journal, $(cut -d' ' -f1 /proc/uptime) s apres le demarrage\";"
+        " echo; echo '== processus (pid nom etat attente)';"
+        " for p in /proc/[0-9]*; do echo \"${p#/proc/} $(cat $p/comm) $(cut -d' ' -f3 $p/stat) $(cat $p/wchan)\"; done;"
+        " echo; echo '== piles des processus TitanOs';"
+        " for p in /proc/[0-9]*; do [ \"$(cat $p/comm)\" = init ] && { echo \"-- ${p#/proc/}\"; cat $p/stack; }; done;"
+        " echo; echo '== entrees'; ls -l /dev/input /dev/dri; cat /proc/bus/input/devices;"
+        " echo; echo '== pilotes'; cut -d' ' -f1 /proc/modules | tr '\\n' ' '; echo;"
+        " echo; echo '== blocs'; cat /proc/partitions; echo; echo '== montages'; cat /proc/mounts;"
+        " echo; echo '== noyau'; dmesg;"
+        " } > $J 2>&1; sync; sleep 5; i=$((i+1)); done";
+    char *argv[] = { "/bin/busybox", "sh", "-c", (char *)script, NULL };
+    spawn_quiet(argv);
+}
+
 static void boot_worker(int out) {
     boot_out = out;
     say("Démarrage du noyau Linux…");
@@ -258,6 +279,7 @@ static void boot_worker(int out) {
         if (!on_key) { modules_coldplug(false); sleep_ms(250); }
     }
     if (on_key) {
+        start_journal();
         say("Ouverture de vos fichiers…");
         bool apps = setup_apps(say);
         char m[160];
@@ -268,12 +290,19 @@ static void boot_worker(int out) {
     tell("D\n");
 }
 
-/* journal du démarrage copié sur la clé (lisible sous Windows) : après 15 s puis après 1 min */
-static void write_journal(void) {
-    char *argv[] = { "/bin/busybox", "sh", "-c",
-        "sleep 15; dmesg > /media/titanos/journal-titanos.txt; sync; "
-        "sleep 45; dmesg > /media/titanos/journal-titanos.txt; sync", NULL };
-    spawn_quiet(argv);
+/* ligne de diagnostic affichée en bas de l'écran de verrouillage (bêta) : si l'heure
+ * s'y arrête, le bureau est bloqué ; si « événements » reste à 0, le clavier et la
+ * souris n'arrivent pas jusqu'à TitanOs */
+static const char *diag_key = "recherche";
+void plat_diag(char *b, int n) {
+    static char mods[32768];
+    int nm = 0, len = read_file("/proc/modules", mods, sizeof mods);
+    for (int i = 0; i < len; i++) if (mods[i] == '\n') nm++;
+    char in[96];
+    input_describe(in, sizeof in);
+    uint64_t s = plat_ms() / 1000;
+    snprintf(b, (size_t)n, "Diagnostic · pilotes : %d · clé : %s · entrées : %s · événements : %d · %d:%02d",
+             nm, diag_key, in, input_events, (int)(s / 60), (int)(s % 60));
 }
 
 static void prepare_home(bool on_key, const char *storage) {
@@ -291,7 +320,7 @@ static void prepare_home(bool on_key, const char *storage) {
     if (first) {
         char p[256];
         snprintf(p, sizeof p, "%s/Bienvenue.txt", home);
-        const char *t = "Bienvenue dans TitanOs (bêta 2) !\n\n"
+        const char *t = "Bienvenue dans TitanOs (bêta 3) !\n\n"
                         "TitanOs tourne sur le noyau Linux : Linux fournit les pilotes (écran, clavier,\n"
                         "USB, Wi-Fi, son...), et tout le reste est écrit pour TitanOs.\n\n"
                         "Vos fichiers sont gardés sur la clé USB, dans le dossier Utilisateur.\n"
@@ -371,7 +400,9 @@ static int session_main(void) {
     audio_start();
     hw_start();                              /* Wi-Fi et batterie : processus séparé */
     net_autostart();
-    if (on_key) write_journal();
+    diag_key = on_key ? "montée" : "introuvable";
+    module_load("evdev");                    /* au cas où le processus de démarrage aurait échoué */
+    module_load("psmouse");
     input_scan();
     core_start();
     if (!on_key) wm_toast("Clé TITANOS introuvable : vos fichiers ne seront pas conservés.");

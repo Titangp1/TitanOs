@@ -25,7 +25,7 @@ typedef __builtin_va_list va_list;
 #define false 0
 #define NULL  ((void *)0)
 
-#define TITANOS_VERSION "Bêta 2"
+#define TITANOS_VERSION "Bêta 3"
 #define countof(a) ((int)(sizeof(a) / sizeof((a)[0])))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -157,6 +157,7 @@ bool  plat_muted(int set);                                  /* set<0 : lecture ;
 
 typedef struct { bool present, charging, ac; int percent, minutes; } battery_t;
 void  plat_battery(battery_t *b);
+void  plat_diag(char *buf, int n);                   /* ligne de diagnostic (bêta), vide sinon */
 
 /* Wi-Fi (wpa_supplicant) */
 typedef struct { char ssid[33]; int signal; bool secure, known, current; } wifi_net_t;

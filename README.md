@@ -1,4 +1,4 @@
-# TitanOs — bêta 2
+# TitanOs — bêta 3
 
 Système d'exploitation **léger** sur base Linux, avec un bureau **liquid glass** écrit en C,
 sans bibliothèque, et pensé pour le **Sony VAIO série F** (Core i7, GeForce GT 330M).
@@ -60,7 +60,7 @@ Raccourcis : touche Windows (menu et recherche), Alt+Tab, Alt+F4, Ctrl+Alt+T (Te
 
 ## Installer sur une clé USB
 
-1. Télécharger `titanos-beta2.img.zip` dans les [versions publiées](../../releases), puis le décompresser.
+1. Télécharger `titanos-beta3.img.zip` dans les [versions publiées](../../releases), puis le décompresser.
 2. Écrire `titanos.img` sur une clé USB avec **Rufus, en mode DD**. Cela efface la clé.
    Prenez une clé d'au moins 2 Go : la place libre accueillera les applications.
 3. **Sony VAIO (BIOS)** : touche F2, onglet Boot, activer **External Device Boot** et mettre la clé
@@ -154,9 +154,16 @@ tools/                téléchargement Alpine, polices, initramfs, image disque,
 
 ## Si quelque chose ne va pas
 
-Une minute après le démarrage, TitanOs copie son journal (`dmesg`) sur la clé, dans
-`journal-titanos.txt`. Branchez la clé sur Windows et envoyez ce fichier : il indique les pilotes
-chargés, l'écran, le clavier, la souris, le son et le Wi-Fi.
+- **En bas de l'écran de verrouillage**, une ligne de diagnostic indique le nombre de pilotes chargés,
+  si la clé est montée, les claviers, souris et pavés tactiles trouvés, le nombre d'événements reçus
+  (touches, mouvements) et le temps écoulé depuis le démarrage. Si ce temps s'arrête, le bureau est bloqué.
+- **Sur la clé**, dès qu'elle est trouvée, TitanOs écrit `journal-titanos.txt` toutes les 5 secondes
+  pendant 4 minutes : messages du noyau, pilotes, périphériques, et l'endroit où chaque processus attend.
+  Branchez la clé sur Windows et envoyez ce fichier.
+
+## Nouveautés de la bêta 3
+
+- Ligne de diagnostic sur l'écran de verrouillage, journal plus complet et écrit plus tôt.
 
 ## Nouveautés de la bêta 2
 
@@ -171,8 +178,8 @@ chargés, l'écran, le clavier, la souris, le son et le Wi-Fi.
   - le chargeur BIOS démarre Linux dans l'émulateur et dessine bien l'écran de démarrage ;
   - le bureau, les animations et les applications sont rendus et pilotés dans l'aperçu Windows ;
   - le programme Linux et le chargeur UEFI se compilent sans erreur.
-- **Essayé sur le VAIO (bêta 1)** : le démarrage et son animation fonctionnent ; l'écran de verrouillage
-  restait figé, ce que corrige la bêta 2.
+- **Essayé sur le VAIO (bêtas 1 et 2)** : le démarrage et son animation fonctionnent ; l'écran de
+  verrouillage reste figé (souris et clavier sans effet). La bêta 3 sert à trouver pourquoi.
 - **À tester sur le VAIO** :
   - l'écran de verrouillage et le bureau ;
   - le Wi-Fi, le son, la batterie et les touches Fn ;

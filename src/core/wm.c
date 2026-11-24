@@ -951,6 +951,9 @@ static void draw_lock(void) {
     user_initial(ini);
     text_center(T, &font_h1, R(scr_w / 2 - 46, ay - 46, 92, 92), ini, C_TEXT);
     text_draw(T, &font_h2, (scr_w - text_width(&font_h2, g_set.user)) / 2, ay + 60, g_set.user, C_TEXT);
+    char dg[200];
+    plat_diag(dg, sizeof dg);
+    if (dg[0]) text_draw(T, &font_small, (scr_w - text_width(&font_small, dg)) / 2, scr_h - 34, dg, 0xB3FFFFFF);
     const char *hint = "Cliquez ou appuyez sur une touche pour ouvrir la session";
     int hw = text_width(&font_body, hint) + 48;
     draw_glass(&g_hint, R((scr_w - hw) / 2, ay + 112, hw, 44), 22, 0);
@@ -1611,6 +1614,7 @@ int core_frame(void) {
         if (mode == MODE_LOCK) damage_all();
         else { damage(tray_rect(), 100); if (cal_open) damage(cal_rect(), 101); }
     }
+    if (mode == MODE_LOCK && dt.sec != now_dt.sec) damage(R(0, scr_h - 44, scr_w, 30), 0);   /* diagnostic */
     now_dt = dt;
     poll_hardware();
     if (toast_until && now >= toast_until) { toast_until = 0; el_hide(&g_toast); }

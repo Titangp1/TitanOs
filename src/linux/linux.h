@@ -20,6 +20,8 @@ bool display_better_available(void);           /* une vraie carte graphique a pr
 
 /* input.c : clavier, souris, pavé tactile */
 void input_scan(void);
+void input_describe(char *b, int n);
+extern int input_events;
 int  input_fill_poll(struct pollfd *p, int max);
 void input_read(struct pollfd *p, int n);
 extern int input_screen_w, input_screen_h;
