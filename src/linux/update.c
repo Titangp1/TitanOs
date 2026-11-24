@@ -183,16 +183,41 @@ static bool s2_layout(const uint8_t *s, long n, uint32_t out[3]) {
     return true;
 }
 
+/* pourquoi GitHub ne répond pas : adresse, passerelle, DNS ou HTTPS ? */
+static void net_diagnose(char *out, int n) {
+    char buf[4096];
+    bool route = false;
+    if (read_file("/proc/net/route", buf, sizeof buf) > 0)
+        for (char *l = strchr(buf, '\n'); l && *l; l = strchr(l + 1, '\n')) {
+            char *t = strchr(l + 1, '\t');
+            if (t && !strncmp(t + 1, "00000000", 8)) { route = true; break; }
+        }
+    if (!route) { strlcpy(out, "Pas de connexion : aucune adresse reçue du réseau (box, câble ou téléphone).", (size_t)n); return; }
+    if (read_file("/etc/resolv.conf", buf, sizeof buf) <= 0 || !strstr(buf, "nameserver")) {
+        strlcpy(out, "Connecté, mais aucun serveur DNS n'a été donné par le réseau.", (size_t)n);
+        return;
+    }
+    char *ns[] = { "/bin/busybox", "nslookup", "api.github.com", NULL };
+    if (run(ns) != 0) { strlcpy(out, "Connecté, mais le nom github.com ne se résout pas (DNS).", (size_t)n); return; }
+    char err[200] = "";
+    read_file(WORK "/erreur", err, sizeof err);
+    for (char *c = err; *c; c++) if (*c == '\n') { *c = 0; break; }
+    snprintf(out, (size_t)n, "Connexion sécurisée à GitHub impossible : %s", err[0] ? err : "erreur inconnue");
+}
+
 static void update_main(void *arg) {
     bool quiet = arg != NULL;              /* recherche automatique : pas d'erreur affichée */
     say(UPD_CHECKING, -1, "Recherche d'une mise à jour…");
     char *rm[] = { "/bin/busybox", "rm", "-rf", WORK, NULL };
     run(rm);
     mkdirs(WORK);
-    char *api[] = { "/bin/busybox", "wget", "-q", "-T", "20", "-O", WORK "/api.json",
-                    "https://api.github.com/repos/" REPO "/releases?per_page=1", NULL };
+    char *api[] = { "/bin/busybox", "sh", "-c", "/bin/busybox wget -q -T 20 -O " WORK "/api.json "
+                    "'https://api.github.com/repos/" REPO "/releases?per_page=1' 2> " WORK "/erreur", NULL };
     if (run(api) != 0) {
-        say(quiet ? UPD_IDLE : UPD_ERROR, -1, "Impossible de joindre GitHub : vérifiez la connexion à Internet.");
+        char why[160];
+        net_diagnose(why, sizeof why);
+        klog("mise à jour : %s", why);
+        say(quiet ? UPD_IDLE : UPD_ERROR, -1, "%s", why);
         return;
     }
     long n;

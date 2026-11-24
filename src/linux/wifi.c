@@ -51,6 +51,8 @@ static const char *conf_path(void) {
 }
 
 /* dans le veilleur : prépare le Wi-Fi dès qu'une carte apparaît */
+static bool ok(const char *cmd);
+
 static void wifi_start(void) {
     if (ctrl >= 0 || plat_ms() < next_try) return;
     next_try = plat_ms() + 4000;
@@ -61,7 +63,7 @@ static void wifi_start(void) {
     if (path_exists("/media/titanos")) mkdirs("/media/titanos/.titanos");
     const char *conf = conf_path();
     if (!path_exists(conf)) {
-        const char *base = "ctrl_interface=/run/wpa_supplicant\nupdate_config=1\nap_scan=1\n";
+        const char *base = "ctrl_interface=/run/wpa_supplicant\nupdate_config=1\nap_scan=1\ncountry=FR\n";
         plat_writefile(conf, base, strlen(base));
     }
     char sock[64];
@@ -91,6 +93,9 @@ static void wifi_start(void) {
         return;
     }
     ctrl = fd;
+    /* pays : sans lui, la radio reste dans le mode « monde » (puissance et canaux réduits) */
+    ok("SET country FR");
+    ok("SET p2p_disabled 1");
     klog("Wi-Fi : %s prêt", iface);
 }
 
