@@ -358,8 +358,13 @@ static void helper_main(int out, int in) {
             static char lb[4096];
             if (request("LIST_NETWORKS", lb, sizeof lb) > 0 && strstr(lb, "[CURRENT]") && strstr(lb, "TEMP-DISABLED"))
                 s.wstate = WIFI_REFUSED;
-            static uint64_t next_scan;              /* recherche régulière tant qu'on n'est pas connecté */
-            if (plat_ms() >= next_scan) { next_scan = plat_ms() + 15000; w_scan(); }
+            /* recherche forcée seulement si aucun réseau n'est visible et qu'aucune connexion
+             * n'est en cours : une recherche pendant l'authentification la fait échouer */
+            static uint64_t next_scan;
+            if (s.wstate == WIFI_OFF && w_list(s.nets, SNAP_NETS) == 0 && plat_ms() >= next_scan) {
+                next_scan = plat_ms() + 30000;
+                w_scan();
+            }
         }
         static int last_state = -9;
         if (s.wstate != last_state) {

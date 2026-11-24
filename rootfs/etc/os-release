@@ -1,5 +1,5 @@
 NAME="TitanOs"
-VERSION="bêta 13"
-VERSION_ID=0.13-beta13
+VERSION="bêta 14"
+VERSION_ID=0.14-beta14
 ID=titanos
-PRETTY_NAME="TitanOs bêta 13"
+PRETTY_NAME="TitanOs bêta 14"

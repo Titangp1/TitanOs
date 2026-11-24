@@ -773,12 +773,15 @@ pick_variant:
     movzwl  62(%esi), %ecx
     cmpl    scr_h, %ecx
     jne     9f
+    cmpl    $0, native_w                /* écran inconnu (EDID refusé par le BIOS) : on suppose */
+    je      8f                          /* l'écran pour lequel la variante est faite */
     movzwl  64(%esi), %ecx
     cmpl    native_w, %ecx
     jne     9f
     movzwl  66(%esi), %ecx
     cmpl    native_h, %ecx
     jne     9f
+8:
     addl    $BIMG, %eax
     cmpl    $0x4D494254, (%eax)
     jne     9f
@@ -834,7 +837,7 @@ gdtr:
     .long gdt
 
 m_diskarg: .asciz " titanos.disk="
-m_hello:  .asciz "TitanOs beta 13 - demarrage BIOS\r\n"
+m_hello:  .asciz "TitanOs beta 14 - demarrage BIOS\r\n"
 m_kernel: .asciz "  Noyau Linux "
 m_initrd: .asciz "  Systeme TitanOs "
 m_ok:     .asciz " OK\r\n"

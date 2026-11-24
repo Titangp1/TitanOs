@@ -41,7 +41,7 @@ elif os.environ.get("TESTBOOT_VAIO"):
 else:
     MODES = {0x118: (1024, 768), 0x144: (1600, 900), 0x145: (1920, 1080), 0x146: (2560, 1440)}
     EXPECT = (1920, 1080)
-NATIVE = (1920, 1080)
+NATIVE = (0, 0) if os.environ.get("TESTBOOT_NOEDID") else (1920, 1080)
 E820 = [(0, 0x9FC00, 1), (0x9FC00, 0x400, 2), (0xF0000, 0x10000, 2), (0x100000, 0x7FE00000, 1), (0xFEC00000, 0x1400000, 2)]
 
 
@@ -83,7 +83,7 @@ def bios(uc, intno, _):
             struct.pack_into("<H", mi, 50, w * 4)
             uc.mem_write(es_di, bytes(mi))
             setreg("AX", 0x4F)
-        elif ax == 0x4F15 and (reg("BX") & 0xFF) == 1:  # EDID de l'écran
+        elif ax == 0x4F15 and (reg("BX") & 0xFF) == 1 and NATIVE[0]:  # EDID de l'écran
             edid = bytearray(128)
             edid[0:8] = bytes([0, 255, 255, 255, 255, 255, 255, 0])
             w, h = NATIVE
