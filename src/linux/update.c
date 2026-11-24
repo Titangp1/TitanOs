@@ -1,7 +1,9 @@
 /* TitanOs - mises à jour depuis GitHub et installation sur le disque interne
  *
  * Mise à jour : la dernière version publiée sur github.com/Titangp1/TitanOs est comparée
- * à celle-ci (TITANOS_BUILD). Si elle est plus récente, son paquet titanos-maj.tar.gz est
+ * à celle-ci (TITANOS_BUILD). Son numéro est lu dans le fichier VERSION joint à la version
+ * marquée « dernière » (lien direct releases/latest/download/VERSION) : contrairement à
+ * l'API de GitHub (60 demandes par heure sans compte), ce lien n'est pas limité. Si elle est plus récente, son paquet titanos-maj.tar.gz est
  * téléchargé (curl, en HTTPS, certificats vérifiés), ses sommes SHA-256 sont vérifiées, puis les
  * fichiers du système sont réécrits sur place : ils ont une taille fixe et donc toujours
  * les mêmes secteurs (voir tools/mkimage.py), ce qui permet au chargeur BIOS de les
@@ -167,14 +169,6 @@ static bool disk_mounted(const char *disk) {
 /* ================================================================== */
 /* Mise à jour                                                          */
 /* ================================================================== */
-/* numéro de version d'une étiquette « v0.6.0-beta.6 » : le dernier nombre */
-static int tag_build(const char *tag) {
-    int v = -1;
-    for (const char *p = tag; *p; p++)
-        if (*p >= '0' && *p <= '9' && (p == tag || p[-1] < '0' || p[-1] > '9')) v = atoi(p);
-    return v;
-}
-
 /* en-tête du chargeur BIOS (secteur 1) : emplacement des fichiers */
 static bool s2_layout(const uint8_t *s, long n, uint32_t out[3]) {
     if (n < 40 || memcmp(s + 4, "TITN", 4)) return false;
@@ -198,12 +192,14 @@ static void net_diagnose(char *out, int n) {
         strlcpy(out, "Connecté, mais aucun serveur DNS n'a été donné par le réseau.", (size_t)n);
         return;
     }
-    char *ns[] = { "/bin/busybox", "nslookup", "api.github.com", NULL };
+    char *ns[] = { "/bin/busybox", "nslookup", "github.com", NULL };
     if (run(ns) != 0) { strlcpy(out, "Connecté, mais le nom github.com ne se résout pas (DNS).", (size_t)n); return; }
     char err[200] = "";
     read_file(WORK "/erreur", err, sizeof err);
     for (char *c = err; *c; c++) if (*c == '\n') { *c = 0; break; }
-    snprintf(out, (size_t)n, "Connexion sécurisée à GitHub impossible : %s", err[0] ? err : "erreur inconnue");
+    if (strstr(err, "403") || strstr(err, "429"))
+        strlcpy(out, "GitHub refuse pour l'instant (trop de demandes) : TitanOs réessaiera plus tard.", (size_t)n);
+    else snprintf(out, (size_t)n, "Connexion sécurisée à GitHub impossible : %s", err[0] ? err : "erreur inconnue");
 }
 
 static void update_main(void *arg) {
@@ -212,33 +208,27 @@ static void update_main(void *arg) {
     char *rm[] = { "/bin/busybox", "rm", "-rf", WORK, NULL };
     run(rm);
     mkdirs(WORK);
-    char *api[] = { "/bin/busybox", "sh", "-c", "/usr/bin/curl -fsS --max-time 20 -o " WORK "/api.json "
-                    "'https://api.github.com/repos/" REPO "/releases?per_page=1' 2> " WORK "/erreur", NULL };
-    if (run(api) != 0) {
+    char *ver[] = { "/bin/busybox", "sh", "-c", "/usr/bin/curl -fsSL --max-time 20 -o " WORK "/VERSION.latest "
+                    "'https://github.com/" REPO "/releases/latest/download/VERSION' 2> " WORK "/erreur", NULL };
+    if (run(ver) != 0) {
         char why[160];
         net_diagnose(why, sizeof why);
         klog("mise à jour : %s", why);
         say(quiet ? UPD_IDLE : UPD_ERROR, -1, "%s", why);
         return;
     }
-    long n;
-    char *j = (char *)slurp(WORK "/api.json", &n);
-    char tag[64] = { 0 };
-    char *t = j ? strstr(j, "\"tag_name\"") : NULL;
-    if (t && (t = strchr(t + 10, '"'))) {
-        t++;
-        int k = 0;
-        while (t[k] && t[k] != '"' && k < 63) { tag[k] = t[k]; k++; }
-    }
-    free(j);
-    int build = tag_build(tag);
+    char vb[16] = "";
+    read_file(WORK "/VERSION.latest", vb, sizeof vb);
+    int build = vb[0] >= '0' && vb[0] <= '9' ? atoi(vb) : -1;
     if (build < 0) { say(quiet ? UPD_IDLE : UPD_ERROR, -1, "Réponse de GitHub incomprise."); return; }
     if (build <= TITANOS_BUILD) { say(UPD_UPTODATE, -1, "TitanOs est à jour (" TITANOS_VERSION ")."); return; }
+    char tag[32];
+    snprintf(tag, sizeof tag, "bêta %d", build);
     klog("mise à jour : %s disponible", tag);
 
     /* téléchargement, avec la taille reçue affichée */
     char url[192];
-    snprintf(url, sizeof url, "https://github.com/" REPO "/releases/download/%s/titanos-maj.tar.gz", tag);
+    snprintf(url, sizeof url, "https://github.com/" REPO "/releases/latest/download/titanos-maj.tar.gz");
     char *get[] = { "/usr/bin/curl", "-fsSL", "--max-time", "900", "-o", WORK "/maj.tar.gz", url, NULL };
     int pid = sys_fork();
     if (pid == 0) {
@@ -316,8 +306,12 @@ static void update_main(void *arg) {
 }
 
 void plat_update_check(bool automatic) {
+    static uint64_t last;
     if (ins.pid > 0) return;                           /* pas pendant une installation */
-    if (plat_update_state(NULL, 0, NULL) == UPD_DONE) return;   /* déjà installée : il reste à redémarrer */
+    int st = plat_update_state(NULL, 0, NULL);
+    if (st == UPD_DONE) return;                        /* déjà installée : il reste à redémarrer */
+    if (st == UPD_UPTODATE && last && plat_ms() - last < 60000) return;   /* vérifié il y a moins d'une minute */
+    last = plat_ms();
     job_start(&upd, update_main, automatic ? (void *)1 : NULL);
 }
 

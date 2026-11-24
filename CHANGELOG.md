@@ -2,6 +2,12 @@
 
 Toutes les versions sont dans les [versions publiées](../../releases). Depuis la bêta 6, TitanOs se met à jour tout seul.
 
+## Bêta 20
+
+- La recherche de mise à jour n'utilise plus l'API de GitHub. Sans compte, celle-ci n'accepte que 60 demandes par heure ; au-delà, elle répondait « erreur 403 ». TitanOs lit maintenant le numéro de version directement dans la dernière version publiée, par un lien qui n'a pas cette limite.
+- Cliquer plusieurs fois sur « Rechercher maintenant » ne relance plus la recherche pendant une minute.
+- Si GitHub refuse quand même, le message l'explique clairement, au lieu d'afficher « erreur 403 ».
+
 ## Bêta 19
 
 - TitanOs est maintenant distribué sous la licence **GNU GPL version 3** (voir LICENSE, NOTICE et CONTRIBUTING.md).
