@@ -500,6 +500,11 @@ void plat_power(int action) {
     sys_reboot(action ? LINUX_REBOOT_CMD_RESTART : LINUX_REBOOT_CMD_POWER_OFF);
 }
 
+void plat_suspend(void) {
+    sys_sync();
+    if (write_file("/sys/power/state", "mem") != 0) write_file("/sys/power/state", "freeze");
+}
+
 static char bl_dir[128];
 static int bl_max;
 

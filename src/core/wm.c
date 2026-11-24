@@ -52,6 +52,8 @@ static void draw_shadow(canvas_t *dst, shadow_t *s, rect_t r, float radius, floa
 }
 
 typedef struct { rect_t r; bool ok, shown, leaving; canvas_t cache; int level; uint64_t t0; shadow_t sh; } glass_el_t;
+static field_t lock_pw;                    /* mot de passe tapé à l'écran de verrouillage */
+static bool lock_bad;
 static glass_el_t g_power, g_dock, g_tray, g_menu, g_cal, g_pop, g_toast, g_osd, g_avatar, g_hint;
 
 /* transitions plein écran : l'ancienne image (snap) s'efface par-dessus la nouvelle */
@@ -532,6 +534,18 @@ static void snapshot(void) {
     memcpy(snap.px, scene.px, (size_t)scr_w * scr_h * 4);
 }
 
+/* mise en veille : la session se verrouille d'abord, l'écran de verrouillage attend au réveil */
+void wm_suspend(void) {
+    settings_save();
+    wm_lock();
+    trans = TR_NONE;
+    damage_all();
+    core_frame();
+    plat_suspend();
+    now = plat_ms();
+    damage_all();
+}
+
 void wm_lock(void) {
     if (mode != MODE_DESK) return;
     close_menu();
@@ -540,6 +554,8 @@ void wm_lock(void) {
     capture = NULL;
     drag_kind = DR_NONE;
     snapshot();                              /* le bureau s'efface sous l'écran de verrouillage */
+    ui_field_set(&lock_pw, "");
+    lock_bad = false;
     mode = MODE_LOCK;
     trans = TR_FADE;
     trans_t0 = now;
@@ -548,6 +564,7 @@ void wm_lock(void) {
 }
 
 static void draw_lock(void);
+static rect_t lock_field_rect(void) { return R(scr_w / 2 - 170, scr_h / 2 + 110 + 112, 340, 44); }
 static void unlock(void) {
     /* l'écran de verrouillage glisse vers le haut en s'effaçant */
     if (snap.w != scr_w || snap.h != scr_h) { canvas_free(&snap); snap = canvas_new(scr_w, scr_h); }
@@ -790,6 +807,13 @@ static void draw_tooltip(void) {
     text_center(T, &font_body, b, t, C_TEXT);
 }
 
+void wm_suspend(void);
+static void power_menu_cb(int i, void *ctx) {
+    (void)ctx;
+    if (i == 0) wm_suspend();
+    else wm_power(i == 1 ? 1 : 0);
+}
+
 static void draw_power(void) {
     rect_t r = power_rect();
     if (!rect_hits(rect_grow(r, 30), T->clip)) return;
@@ -1002,10 +1026,24 @@ static void draw_lock(void) {
     char dg[200];
     plat_diag(dg, sizeof dg);
     if (dg[0]) text_draw(T, &font_small, (scr_w - text_width(&font_small, dg)) / 2, scr_h - 34, dg, 0xB3FFFFFF);
-    const char *hint = "Cliquez ou appuyez sur une touche pour ouvrir la session";
-    int hw = text_width(&font_body, hint) + 48;
-    draw_glass(&g_hint, R((scr_w - hw) / 2, ay + 112, hw, 44), 22, 0);
-    text_center(T, &font_body, R((scr_w - hw) / 2, ay + 112, hw, 44), hint, C_TEXT);
+    if (g_set.pass[0]) {                    /* mot de passe demandé */
+        rect_t f = lock_field_rect();
+        draw_glass(&g_hint, f, 22, 0);
+        lock_pw.secret = true;
+        lock_pw.focus = true;
+        if (lock_pw.s[0]) ui_field(T, f, &lock_pw, NULL);
+        else {
+            text_center(T, &font_body, f, "Mot de passe", C_MUTED);
+            gfx_fill(T, R(f.x + 20, f.y + 12, 2, 20), accent());
+        }
+        const char *m = lock_bad ? "Mot de passe incorrect" : "Entrée pour ouvrir la session";
+        text_center(T, &font_small, R(0, f.y + f.h + 10, scr_w, 18), m, lock_bad ? 0xFFFCA5A5 : 0xB3FFFFFF);
+    } else {
+        const char *hint = "Cliquez ou appuyez sur une touche pour ouvrir la session";
+        int hw = text_width(&font_body, hint) + 48;
+        draw_glass(&g_hint, R((scr_w - hw) / 2, ay + 112, hw, 44), 22, 0);
+        text_center(T, &font_body, R((scr_w - hw) / 2, ay + 112, hw, 44), hint, C_TEXT);
+    }
     if (bat.present) {
         char b[24];
         snprintf(b, sizeof b, "%d %%", bat.percent);
@@ -1347,7 +1385,7 @@ static void mouse_button(const event_t *e) {
         last_click_y = my;
     }
     if (mode == MODE_LOCK) {
-        if (e->down && !trans) unlock();
+        if (e->down && !trans && !g_set.pass[0]) unlock();
         return;
     }
     if (mode != MODE_DESK) return;
@@ -1403,7 +1441,13 @@ static void mouse_button(const event_t *e) {
         }
         return;
     }
-    if (rect_has(power_rect(), mx, my)) { sound_play(SFX_CLICK); wm_power(0); return; }
+    if (rect_has(power_rect(), mx, my)) {
+        sound_play(SFX_CLICK);
+        static const char *const items[] = { "Mettre en veille", "Redémarrer", "Éteindre" };
+        rect_t r = power_rect();
+        wm_menu(r.x, r.y - 8, items, 3, power_menu_cb, NULL);
+        return;
+    }
     if (rect_has(tray_rect(), mx, my)) {
         if (tray_hover == TP_CLOCK) toggle_cal();
         else if (tray_hover == TP_KBD) { sound_play(SFX_CLICK); wm_kbd_layout_toggle(); }
@@ -1527,7 +1571,20 @@ void core_event(const event_t *e) {
             return;
         }
         }
-        if (mode == MODE_LOCK) { if (!trans) unlock(); return; }
+        if (mode == MODE_LOCK) {
+            if (trans) return;
+            if (!g_set.pass[0]) { unlock(); return; }
+            if (e->key == K_ENTER) {
+                char h[20];
+                settings_pass_hash(lock_pw.s, h);
+                ui_field_set(&lock_pw, "");
+                if (!strcmp(h, g_set.pass)) { lock_bad = false; unlock(); }
+                else { lock_bad = true; sound_play(SFX_ERROR); }
+            } else if (e->key == K_ESC) ui_field_set(&lock_pw, "");
+            else { ui_field_key(&lock_pw, e); lock_bad = false; }
+            damage(R(0, lock_field_rect().y - 40, scr_w, 120), 0);
+            return;
+        }
         if (pop_open && e->key == K_ESC) { close_pop(); return; }
         if (menu_open) { menu_key(e); return; }
         if (e->key == K_SUPER) { open_menu(); return; }

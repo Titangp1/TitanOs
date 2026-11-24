@@ -11,7 +11,7 @@ typedef struct {
 
 enum {   /* zones cliquables */
     H_TAB0 = 1, H_TAB1, H_WALL0 = 10, H_ACC0 = 20, H_GLASS0 = 30, H_NAME = 40, H_SECONDS, H_LAYOUT0 = 50,
-    H_PTR, H_BRIGHT, H_VOL, H_SOUNDS, H_TZ_PREV, H_TZ_NEXT, H_RTC, H_NTP,
+    H_PTR, H_BRIGHT, H_VOL, H_SOUNDS, H_TZ_PREV, H_TZ_NEXT, H_RTC, H_NTP, H_PASS, H_PASS_DEL,
 };
 
 static rect_t tabs_rect(canvas_t *c) { return R(c->w / 2 - 150, 12, 300, 36); }
@@ -33,8 +33,10 @@ static rect_t tz_prev(canvas_t *c) { rect_t r = row_rect(c, 5); return R(r.x + r
 static rect_t tz_next(canvas_t *c) { rect_t r = row_rect(c, 5); return R(r.x + r.w - 44, r.y + 9, 34, 34); }
 static rect_t rtc_rect(canvas_t *c) { rect_t r = row_rect(c, 6); return R(r.x + r.w - 62, r.y + 11, 52, 30); }
 static rect_t ntp_rect(canvas_t *c) { rect_t r = row_rect(c, 7); return R(r.x + r.w - 230, r.y + 8, 220, 36); }
+static rect_t pass_rect(canvas_t *c) { rect_t r = row_rect(c, 8); return R(r.x + r.w - 180, r.y + 8, 170, 36); }
+static rect_t pass_del_rect(canvas_t *c) { rect_t r = row_rect(c, 8); return R(r.x + r.w - 320, r.y + 8, 130, 36); }
 #define APPEARANCE_H 480
-#define SYSTEM_H     556
+#define SYSTEM_H     616
 
 static void section(canvas_t *c, int y, const char *t) { text_draw(c, &font_bold, 28, y, t, C_TEXT2); }
 
@@ -108,6 +110,9 @@ static void draw_system(prefs_t *p, canvas_t *c) {
     ui_toggle(c, rtc_rect(c), g_set.rtc_local);
     row_label(c, row_rect(c, 7), "Heure par Internet", p->ntp_job >= 0 ? "Synchronisation en cours…" : "Serveur pool.ntp.org");
     ui_button(c, ntp_rect(c), "Mettre à l'heure", BTN_NORMAL, p->hover == H_NTP);
+    row_label(c, row_rect(c, 8), "Mot de passe de session", g_set.pass[0] ? "Demandé à l'écran de verrouillage" : "Aucun : la session s'ouvre d'un clic");
+    ui_button(c, pass_rect(c), g_set.pass[0] ? "Changer…" : "Définir…", BTN_NORMAL, p->hover == H_PASS);
+    if (g_set.pass[0]) ui_button(c, pass_del_rect(c), "Retirer", BTN_NORMAL, p->hover == H_PASS_DEL);
 }
 
 static void prefs_draw(window_t *w, canvas_t *c) {
@@ -139,8 +144,19 @@ static int hit(prefs_t *p, canvas_t *c, int x, int y) {
         if (rect_has(tz_next(c), x, y)) return H_TZ_NEXT;
         if (rect_has(rtc_rect(c), x, y)) return H_RTC;
         if (rect_has(ntp_rect(c), x, y)) return H_NTP;
+        if (rect_has(pass_rect(c), x, y)) return H_PASS;
+        if (g_set.pass[0] && rect_has(pass_del_rect(c), x, y)) return H_PASS_DEL;
     }
     return 0;
+}
+
+static void pass_cb(const char *pw, void *ctx) {
+    window_t *w = ctx;
+    if (strlen(pw) < 4) { dlg_message("Mot de passe", "Choisissez au moins 4 caractères."); return; }
+    settings_pass_hash(pw, g_set.pass);
+    settings_save();
+    wm_toast("Mot de passe enregistré : il sera demandé pour ouvrir la session.");
+    if (w && w->used) wm_invalidate(w);
 }
 
 static void commit_name(prefs_t *p) {
@@ -196,6 +212,8 @@ static void prefs_event(window_t *w, const event_t *e) {
         else if (h == H_TZ_PREV) { g_set.tz = (g_set.tz + tz_count - 1) % tz_count; g_set.rtc_local = false; }
         else if (h == H_TZ_NEXT) { g_set.tz = (g_set.tz + 1) % tz_count; g_set.rtc_local = false; }
         else if (h == H_RTC) g_set.rtc_local = !g_set.rtc_local;
+        else if (h == H_PASS) dlg_password("Mot de passe de session", "Nouveau mot de passe (4 caractères au moins)", pass_cb, w);
+        else if (h == H_PASS_DEL) { g_set.pass[0] = 0; settings_save(); wm_toast("Mot de passe retiré."); }
         else if (h == H_NTP && p->ntp_job < 0) {
             static const char *const argv[] = { "/bin/busybox", "ntpd", "-n", "-q", "-p", "pool.ntp.org", NULL };
             p->ntp_job = plat_spawn(argv);

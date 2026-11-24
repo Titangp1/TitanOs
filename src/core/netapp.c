@@ -224,7 +224,7 @@ static void net_tick(window_t *w, uint64_t now) {
             wm_invalidate(w);
         }
     }
-    if (now >= s->next_scan && s->wstate != WIFI_NONE) { s->next_scan = now + 10000; plat_wifi_scan(); }
+    if (now >= s->next_scan && s->wstate != WIFI_NONE && s->wstate != WIFI_CONNECTING) { s->next_scan = now + 10000; plat_wifi_scan(); }
     if (now >= s->next_list) {
         s->next_list = now + 1500;
         refresh(s);

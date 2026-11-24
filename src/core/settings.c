@@ -216,6 +216,7 @@ void settings_load(void) {
             else if (!strcmp(k, "sons")) g_set.sounds = n != 0;
             else if (!strcmp(k, "volume")) g_set.volume = CLAMP(n, 0, 100);
             else if (!strcmp(k, "pointeur")) g_set.pointer = CLAMP(n, 1, 5);
+            else if (!strcmp(k, "mot_de_passe")) strlcpy(g_set.pass, v, sizeof g_set.pass);
         }
         p = nl + 1;
     }
@@ -223,12 +224,25 @@ void settings_load(void) {
     if (!g_set.user[0]) strlcpy(g_set.user, "Titan", sizeof g_set.user);
 }
 
+/* empreinte d'un mot de passe : le mot de passe lui-même n'est jamais enregistré
+ * (FNV-1a 64 bits salé, répété 20 000 fois) */
+void settings_pass_hash(const char *pw, char out[20]) {
+    uint64_t h = 1469598103934665603ull;
+    const char *salt = "TitanOs-session";
+    for (int r = 0; r < 20000; r++) {
+        for (const char *p = salt; *p; p++) h = (h ^ (uint8_t)*p) * 1099511628211ull;
+        for (const char *p = pw; *p; p++) h = (h ^ (uint8_t)*p) * 1099511628211ull;
+        h ^= (uint64_t)r;
+    }
+    snprintf(out, 20, "%08x%08x", (unsigned)(h >> 32), (unsigned)h);
+}
+
 void settings_save(void) {
-    char buf[600];
+    char buf[700];
     int n = snprintf(buf, sizeof buf,
                      "# Réglages de TitanOs\nfond=%d\naccent=%d\nutilisateur=%s\nsecondes=%d\nclavier=%s\n"
-                     "fuseau=%d\nhorloge_locale=%d\nluminosite=%d\nverre=%d\nsons=%d\nvolume=%d\npointeur=%d\n",
+                     "fuseau=%d\nhorloge_locale=%d\nluminosite=%d\nverre=%d\nsons=%d\nvolume=%d\npointeur=%d\nmot_de_passe=%s\n",
                      g_set.wallpaper, g_set.accent, g_set.user, g_set.seconds, g_set.layout ? "us" : "fr",
-                     g_set.tz, g_set.rtc_local, g_set.brightness, g_set.glass, g_set.sounds, g_set.volume, g_set.pointer);
+                     g_set.tz, g_set.rtc_local, g_set.brightness, g_set.glass, g_set.sounds, g_set.volume, g_set.pointer, g_set.pass);
     plat_writefile(plat_config_path(), buf, (size_t)n);
 }

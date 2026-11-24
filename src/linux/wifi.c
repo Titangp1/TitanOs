@@ -214,7 +214,16 @@ static int w_status(char *ssid, int n, int *signal) {
     return WIFI_OFF;
 }
 
-static void w_scan(void) { ok("SCAN"); }
+/* une recherche pendant l'authentification (4-way handshake) fait échouer la connexion */
+static void w_scan(void) {
+    char st[1024];
+    if (request("STATUS", st, sizeof st) > 0 &&
+        (strstr(st, "wpa_state=ASSOCIATING") || strstr(st, "wpa_state=ASSOCIATED") ||
+         strstr(st, "wpa_state=AUTHENTICATING") || strstr(st, "wpa_state=4WAY_HANDSHAKE") ||
+         strstr(st, "wpa_state=GROUP_HANDSHAKE")))
+        return;
+    ok("SCAN");
+}
 
 static int w_list(wifi_net_t *list, int max) {
     static char buf[16384];

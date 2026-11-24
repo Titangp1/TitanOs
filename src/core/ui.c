@@ -315,6 +315,6 @@ void dlg_password(const char *title, const char *label, void (*cb)(const char *,
         dlg_t *d = w->data;
         d->field.secret = true;
         d->password = true;
-        strlcpy(d->ok, "Se connecter", sizeof d->ok);
+        strlcpy(d->ok, strstr(title, "Wi-Fi") ? "Se connecter" : "Valider", sizeof d->ok);
     }
 }

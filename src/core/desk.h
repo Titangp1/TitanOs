@@ -38,7 +38,9 @@ typedef struct {
     bool sounds;          /* sons de l'interface */
     int  volume;          /* volume général, 0-100 */
     int  pointer;         /* vitesse du pointeur, 1-5 */
+    char pass[20];        /* empreinte du mot de passe de session (vide : aucun) */
 } settings_t;
+void settings_pass_hash(const char *pw, char out[20]);   /* empreinte d'un mot de passe */
 extern settings_t g_set;
 void     settings_load(void);
 void     settings_save(void);
@@ -97,6 +99,7 @@ void      wm_toast(const char *msg);
 void      core_hold(bool hold);       /* garder l'écran tel quel (démarrage) */
 void      wm_menu(int x, int y, const char *const *items, int n, void (*cb)(int i, void *ctx), void *ctx);
 void      wm_lock(void);
+void      wm_suspend(void);
 void      wm_theme_changed(void);
 void      wm_power(int action);          /* 0 éteindre, 1 redémarrer, avec confirmation */
 void      clip_set(const char *s, int n);
