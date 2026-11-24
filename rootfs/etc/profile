@@ -1,0 +1,41 @@
+# TitanOs - profil du shell (BusyBox ash), lu à l'ouverture du Terminal
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+export PAGER=less EDITOR=vi
+PS1='\[\e[1;32m\]\u\[\e[0m\]@\[\e[36m\]\h\[\e[0m\]:\[\e[1;34m\]\w\[\e[0m\]\$ '
+[ "$(id -u)" = 0 ] && PS1='\[\e[1;35m\]titan\[\e[0m\]@\[\e[36m\]\h\[\e[0m\]:\[\e[1;34m\]\w\[\e[0m\]\$ '
+
+alias ls='ls --color=auto'
+alias ll='ls -l'
+alias la='ls -la'
+alias effacer='clear'
+alias ouvrir='cd'
+alias copier='cp'
+alias deplacer='mv'
+alias supprimer='rm'
+alias memoire='free -m'
+alias disques='df -h'
+alias reseau='ip addr'
+alias heure='date'
+alias eteindre='poweroff -f'
+alias redemarrer='reboot -f'
+
+aide() {
+    cat <<'FIN'
+Commandes utiles (BusyBox) :
+  ls, cd, pwd, cat, cp, mv, rm, mkdir   fichiers et dossiers
+  vi fichier.txt                        éditeur de texte du terminal
+  free -m, df -h, top, uptime           mémoire, disques, processus
+  ip addr, ping 1.1.1.1, wget URL       réseau
+  dmesg | tail                          messages du noyau Linux
+  lsmod, modprobe pilote                pilotes chargés / à charger
+Alias en français : effacer, memoire, disques, reseau, heure, eteindre, redemarrer
+Vos fichiers : ~ (dossier Utilisateur sur la clé TITANOS)
+FIN
+}
+
+if [ -t 1 ] && [ -z "$TITANOS_BIENVENUE" ]; then
+    export TITANOS_BIENVENUE=1
+    printf '\033[1;35mTitanOs bêta 1\033[0m - noyau Linux %s - BusyBox\n' "$(uname -r)"
+    printf 'Tapez \033[1maide\033[0m pour la liste des commandes.\n\n'
+fi
+cd "$HOME" 2>/dev/null

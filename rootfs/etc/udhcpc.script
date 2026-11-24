@@ -1,0 +1,20 @@
+#!/bin/sh
+# TitanOs - appelé par « udhcpc » (BusyBox) : applique l'adresse reçue du réseau
+case "$1" in
+    deconfig)
+        ip link set "$interface" up
+        ip -4 addr flush dev "$interface"
+        ;;
+    bound|renew)
+        ip -4 addr flush dev "$interface"
+        ip addr add "$ip/${mask:-24}" ${broadcast:+broadcast "$broadcast"} dev "$interface"
+        if [ -n "$router" ]; then
+            while ip route del default dev "$interface" 2>/dev/null; do :; done
+            for r in $router; do ip route add default via "$r" dev "$interface"; break; done
+        fi
+        : > /etc/resolv.conf
+        for d in $dns; do echo "nameserver $d" >> /etc/resolv.conf; done
+        [ -s /etc/resolv.conf ] || echo "nameserver 1.1.1.1" > /etc/resolv.conf
+        ;;
+esac
+exit 0
