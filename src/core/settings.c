@@ -216,6 +216,7 @@ void settings_load(void) {
             else if (!strcmp(k, "sons")) g_set.sounds = n != 0;
             else if (!strcmp(k, "volume")) g_set.volume = CLAMP(n, 0, 100);
             else if (!strcmp(k, "pointeur")) g_set.pointer = CLAMP(n, 1, 5);
+            else if (!strcmp(k, "mot_de_passe")) strlcpy(g_set.pass, v, sizeof g_set.pass);
         }
         p = nl + 1;
     }
@@ -223,12 +224,128 @@ void settings_load(void) {
     if (!g_set.user[0]) strlcpy(g_set.user, "Titan", sizeof g_set.user);
 }
 
+/* ---------------- mot de passe de session ----------------
+ * Seule une empreinte est enregistrée : PBKDF2-HMAC-SHA256, sel aléatoire de 8 octets,
+ * 20 000 tours (« s2$sel$empreinte »). Les anciennes empreintes restent acceptées. */
+typedef struct { uint32_t h[8]; uint8_t buf[64]; uint64_t len; } sha256_t;
+static const uint32_t K256[64] = {
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01,
+    0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+    0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+    0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08,
+    0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+    0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+};
+#define ROR(x, n) (((x) >> (n)) | ((x) << (32 - (n))))
+static void sha_block(sha256_t *s, const uint8_t *p) {
+    uint32_t w[64];
+    for (int i = 0; i < 16; i++) w[i] = (uint32_t)p[i * 4] << 24 | (uint32_t)p[i * 4 + 1] << 16 | (uint32_t)p[i * 4 + 2] << 8 | p[i * 4 + 3];
+    for (int i = 16; i < 64; i++) {
+        uint32_t s0 = ROR(w[i - 15], 7) ^ ROR(w[i - 15], 18) ^ (w[i - 15] >> 3);
+        uint32_t s1 = ROR(w[i - 2], 17) ^ ROR(w[i - 2], 19) ^ (w[i - 2] >> 10);
+        w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+    }
+    uint32_t a = s->h[0], b = s->h[1], c = s->h[2], d = s->h[3], e = s->h[4], f = s->h[5], g = s->h[6], h = s->h[7];
+    for (int i = 0; i < 64; i++) {
+        uint32_t t1 = h + (ROR(e, 6) ^ ROR(e, 11) ^ ROR(e, 25)) + ((e & f) ^ (~e & g)) + K256[i] + w[i];
+        uint32_t t2 = (ROR(a, 2) ^ ROR(a, 13) ^ ROR(a, 22)) + ((a & b) ^ (a & c) ^ (b & c));
+        h = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
+    }
+    s->h[0] += a; s->h[1] += b; s->h[2] += c; s->h[3] += d; s->h[4] += e; s->h[5] += f; s->h[6] += g; s->h[7] += h;
+}
+static void sha_init(sha256_t *s) {
+    static const uint32_t iv[8] = { 0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19 };
+    memcpy(s->h, iv, sizeof iv);
+    s->len = 0;
+}
+static void sha_update(sha256_t *s, const uint8_t *p, size_t n) {
+    while (n--) {
+        s->buf[s->len++ % 64] = *p++;
+        if (s->len % 64 == 0) sha_block(s, s->buf);
+    }
+}
+static void sha_final(sha256_t *s, uint8_t out[32]) {
+    uint64_t bits = s->len * 8;
+    uint8_t one = 0x80, zero = 0;
+    sha_update(s, &one, 1);
+    while (s->len % 64 != 56) sha_update(s, &zero, 1);
+    for (int i = 7; i >= 0; i--) { uint8_t b = (uint8_t)(bits >> (i * 8)); sha_update(s, &b, 1); }
+    for (int i = 0; i < 8; i++) { out[i * 4] = (uint8_t)(s->h[i] >> 24); out[i * 4 + 1] = (uint8_t)(s->h[i] >> 16); out[i * 4 + 2] = (uint8_t)(s->h[i] >> 8); out[i * 4 + 3] = (uint8_t)s->h[i]; }
+}
+static void hmac(const uint8_t *key, size_t kn, const uint8_t *msg, size_t mn, uint8_t out[32]) {
+    uint8_t k[64] = { 0 }, pad[64];
+    if (kn > 64) { sha256_t t; sha_init(&t); sha_update(&t, key, kn); sha_final(&t, k); } else memcpy(k, key, kn);
+    sha256_t s;
+    for (int i = 0; i < 64; i++) pad[i] = k[i] ^ 0x36;
+    sha_init(&s); sha_update(&s, pad, 64); sha_update(&s, msg, mn); sha_final(&s, out);
+    for (int i = 0; i < 64; i++) pad[i] = k[i] ^ 0x5c;
+    sha_init(&s); sha_update(&s, pad, 64); sha_update(&s, out, 32); sha_final(&s, out);
+}
+static void pbkdf2(const char *pw, const uint8_t salt[8], uint8_t out[16]) {
+    uint8_t m[12], u[32], t[32];
+    memcpy(m, salt, 8);
+    m[8] = 0; m[9] = 0; m[10] = 0; m[11] = 1;
+    hmac((const uint8_t *)pw, strlen(pw), m, 12, u);
+    memcpy(t, u, 32);
+    for (int i = 1; i < 20000; i++) {
+        hmac((const uint8_t *)pw, strlen(pw), u, 32, u);
+        for (int k = 0; k < 32; k++) t[k] ^= u[k];
+    }
+    memcpy(out, t, 16);
+}
+static void hex(char *o, const uint8_t *p, int n) { for (int i = 0; i < n; i++) snprintf(o + i * 2, 3, "%02x", p[i]); }
+
+static void pass_hash_salt(const char *pw, const uint8_t salt[8], char out[64]) {
+    uint8_t d[16];
+    pbkdf2(pw, salt, d);
+    char hs[17], hd[33];
+    hex(hs, salt, 8);
+    hex(hd, d, 16);
+    snprintf(out, 64, "s2$%s$%s", hs, hd);
+}
+
+void settings_pass_hash(const char *pw, char out[64]) {
+    uint8_t salt[8];
+    plat_random(salt, sizeof salt);
+    pass_hash_salt(pw, salt, out);
+}
+
+/* ancienne empreinte (bêta 16) : FNV-1a 64 bits salé, répété */
+static void old_hash(const char *pw, char out[20]) {
+    uint64_t h = 1469598103934665603ull;
+    const char *salt = "TitanOs-session";
+    for (int r = 0; r < 20000; r++) {
+        for (const char *p = salt; *p; p++) h = (h ^ (uint8_t)*p) * 1099511628211ull;
+        for (const char *p = pw; *p; p++) h = (h ^ (uint8_t)*p) * 1099511628211ull;
+        h ^= (uint64_t)r;
+    }
+    snprintf(out, 20, "%08x%08x", (unsigned)(h >> 32), (unsigned)h);
+}
+
+bool settings_pass_check(const char *pw) {
+    if (!g_set.pass[0]) return true;
+    if (str_starts(g_set.pass, "s2$") && strlen(g_set.pass) >= 3 + 16 + 1 + 32) {
+        uint8_t salt[8];
+        for (int i = 0; i < 8; i++) {
+            char b[3] = { g_set.pass[3 + i * 2], g_set.pass[4 + i * 2], 0 };
+            salt[i] = (uint8_t)strtol(b, NULL, 16);
+        }
+        char h[64];
+        pass_hash_salt(pw, salt, h);
+        return !strcmp(h, g_set.pass);
+    }
+    char h[20];
+    old_hash(pw, h);
+    return !strcmp(h, g_set.pass);
+}
+
 void settings_save(void) {
-    char buf[600];
+    char buf[700];
     int n = snprintf(buf, sizeof buf,
                      "# Réglages de TitanOs\nfond=%d\naccent=%d\nutilisateur=%s\nsecondes=%d\nclavier=%s\n"
-                     "fuseau=%d\nhorloge_locale=%d\nluminosite=%d\nverre=%d\nsons=%d\nvolume=%d\npointeur=%d\n",
+                     "fuseau=%d\nhorloge_locale=%d\nluminosite=%d\nverre=%d\nsons=%d\nvolume=%d\npointeur=%d\nmot_de_passe=%s\n",
                      g_set.wallpaper, g_set.accent, g_set.user, g_set.seconds, g_set.layout ? "us" : "fr",
-                     g_set.tz, g_set.rtc_local, g_set.brightness, g_set.glass, g_set.sounds, g_set.volume, g_set.pointer);
+                     g_set.tz, g_set.rtc_local, g_set.brightness, g_set.glass, g_set.sounds, g_set.volume, g_set.pointer, g_set.pass);
     plat_writefile(plat_config_path(), buf, (size_t)n);
 }

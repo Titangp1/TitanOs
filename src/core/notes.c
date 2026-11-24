@@ -297,6 +297,21 @@ static void notes_event(window_t *w, const event_t *e) {
     wm_invalidate(w);
 }
 
+static void discard_cb(bool ok, void *ctx) {
+    window_t *w = ctx;
+    if (!ok || !w->used || !w->data) return;
+    ((notes_t *)w->data)->modified = false;
+    wm_close(w);
+}
+
+static bool notes_can_close(window_t *w) {
+    notes_t *n = w->data;
+    if (!n || !n->modified) return true;
+    dlg_confirm("Bloc-notes", "Ce texte n'est pas enregistré. Le fermer quand même ? (Ctrl+S pour enregistrer)",
+                "Fermer", discard_cb, w);
+    return false;
+}
+
 static void notes_close(window_t *w) {
     notes_t *n = w->data;
     if (dlg_win == w) dlg_win = NULL;
@@ -317,5 +332,6 @@ void app_notes_open(const char *path) {
     w->draw = notes_draw;
     w->event = notes_event;
     w->on_close = notes_close;
+    w->can_close = notes_can_close;
     if (path) load(w, n, path);
 }

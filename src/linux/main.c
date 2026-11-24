@@ -76,7 +76,10 @@ static void net_cb(const char *name, int type, void *ctx) {
     iface_up(name);
     char ifn[16];
     strlcpy(ifn, name, sizeof ifn);
-    char *argv[] = { "/bin/busybox", "udhcpc", "-i", ifn, "-b", "-t", "4", "-T", "3", "-A", "8", "-s", "/etc/udhcpc.script", NULL };
+    char pidf[48];
+    snprintf(pidf, sizeof pidf, "/run/udhcpc.%s.pid", ifn);
+    char *argv[] = { "/bin/busybox", "udhcpc", "-i", ifn, "-b", "-t", "4", "-T", "3", "-A", "5", "-p", pidf,
+                     "-s", "/etc/udhcpc.script", NULL };
     spawn_quiet(argv);
     klog("réseau : DHCP lancé sur %s", name);
 }
@@ -293,7 +296,7 @@ static void start_journal(void) {
         " echo; echo '== pilotes'; cut -d' ' -f1 /proc/modules | tr '\\n' ' '; echo;"
         " echo; echo '== blocs'; cat /proc/partitions; echo; echo '== montages'; cat /proc/mounts;"
         " echo; echo '== noyau'; dmesg;"
-        " } > $J.tmp 2>&1; mv -f $J.tmp $J; sync; i=$((i+1)); [ $i -lt 48 ] && sleep 5 || sleep 30; done";
+        " } > $J.tmp 2>&1; mv -f $J.tmp $J; sync; i=$((i+1)); [ $i -lt 48 ] && sleep 5 || sleep 300; done";
     char *argv[] = { "/bin/busybox", "sh", "-c", (char *)script, NULL };
     spawn_quiet(argv);
 }
@@ -364,7 +367,7 @@ static void prepare_home(bool on_key, const char *storage) {
     if (first) {
         char p[256];
         snprintf(p, sizeof p, "%s/Bienvenue.txt", home);
-        const char *t = "Bienvenue dans TitanOs (bêta 15) !\n\n"
+        const char *t = "Bienvenue dans TitanOs (bêta 17) !\n\n"
                         "TitanOs tourne sur le noyau Linux : Linux fournit les pilotes (écran, clavier,\n"
                         "USB, Wi-Fi, son...), et tout le reste est écrit pour TitanOs.\n\n"
                         "Vos fichiers sont gardés sur la clé USB, dans le dossier Utilisateur.\n"
@@ -494,7 +497,7 @@ static int session_main(void) {
     core_start();
     if (!on_key) wm_toast("Clé TITANOS introuvable : vos fichiers ne seront pas conservés.");
 
-    uint64_t next_scan = 0, next_net = 0, next_stat = plat_ms() + 10000;
+    uint64_t next_scan = 0, next_net = 0, next_vol = 0, next_stat = plat_ms() + 10000;
     uint64_t st_frames = 0, st_us = 0, st_max = 0;
     for (;;) {
         struct pollfd pf[24];
@@ -518,6 +521,7 @@ static int session_main(void) {
         uint64_t now = plat_ms();
         if (now >= next_scan) { next_scan = now + 1500; input_scan(); }
         if (now >= next_net) { next_net = now + 3000; net_autostart(); }
+        if (now >= next_vol) { next_vol = now + 2000; volumes_poll(); }
     }
 }
 
@@ -583,6 +587,21 @@ static int start_session(void) {
     return pid;
 }
 
+/* mémoire compressée : la moitié de la mémoire vive en zram, utilisée comme échange */
+static void setup_zram(void) {
+    char mi[256];
+    if (read_file("/proc/meminfo", mi, sizeof mi) <= 0) return;
+    long kb = strtol(mi + 9, NULL, 10);                 /* « MemTotal:  8061512 kB » */
+    if (kb <= 0 || !module_load("zram")) return;
+    for (int i = 0; i < 20 && !path_exists("/sys/block/zram0/disksize"); i++) sleep_ms(20);
+    char sz[32];
+    snprintf(sz, sizeof sz, "%ld", kb * 1024 / 2);
+    if (write_file("/sys/block/zram0/disksize", sz) != 0) return;
+    char *mk[] = { "/bin/busybox", "mkswap", "/dev/zram0", NULL };
+    char *on[] = { "/bin/busybox", "swapon", "-p", "100", "/dev/zram0", NULL };
+    if (run_wait(mk) == 0 && run_wait(on) == 0) klog("mémoire compressée (zram) : %ld Mo", kb / 2048);
+}
+
 static int init_main(void) {
     sys_mount("proc", "/proc", "proc", 0, NULL);
     sys_mount("sysfs", "/sys", "sysfs", 0, NULL);
@@ -609,6 +628,7 @@ static int init_main(void) {
     int uev = uevent_open();
     modules_init();
     klog("TitanOs " TITANOS_VERSION " : démarrage");
+    setup_zram();
 
     bool shell = cmdline_has("titanos.shell");
     int session = shell ? -1 : start_session();

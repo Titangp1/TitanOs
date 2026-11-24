@@ -1,0 +1,94 @@
+# Historique des versions
+
+Toutes les versions sont dans les [versions publiées](../../releases). Depuis la bêta 6, TitanOs se met à jour tout seul.
+
+## Bêta 17
+
+**Réseau**
+- Les interrupteurs radio ne sont plus réécrits en boucle. Avant, TitanOs réécrivait « débloquer la radio » toutes les 2 secondes, sur chaque interrupteur. Sur le VAIO, le pilote `sony-laptop` transmettait chaque écriture au contrôleur, qui pouvait relancer la carte Wi-Fi.
+- Une adresse est demandée (DHCP) dès que le Wi-Fi se connecte, au lieu d'attendre le prochain essai.
+- Les réseaux masqués sont acceptés.
+
+**Affichage**
+- Double tampon synchronisé sur le rafraîchissement de l'écran (60 Hz) : plus de déchirure, et les animations suivent le rythme de l'écran.
+- La fréquence de l'écran est affichée dans Système et Paramètres.
+
+**Animations**
+- Les fenêtres s'ouvrent et se ferment avec un léger zoom, se réduisent vers leur icône du dock et en reviennent.
+- L'agrandissement d'une fenêtre est animé.
+
+**Paramètres**
+- L'application est réorganisée en catégories : personnalisation, écran, son, clavier et souris, réseau, date et heure, compte, système.
+
+**Horloge**
+- Après chaque synchronisation, l'heure exacte est écrite dans l'horloge du PC, en temps universel. Avant, il y avait 1 h et quelques minutes de trop après un redémarrage.
+- TitanOs se met à l'heure tout seul dès qu'Internet est disponible.
+
+**Nouveautés**
+- Capture d'écran (touche Impr. écran), enregistrée en PNG dans *Images*.
+- Visionneuse d'images (PNG et BMP).
+- Clés USB : montage automatique, affichage dans Fichiers et bouton *Éjecter*. FAT, exFAT, NTFS et ext4 sont pris en charge.
+- Le Bloc-notes avertit avant de fermer un texte non enregistré.
+- Mémoire compressée (zram).
+- Pilote Intel `i915` inclus pour les autres PC.
+
+**Fiabilité**
+- Les réglages sont enregistrés de façon sûre : fichier temporaire, puis renommage.
+- Le journal sur la clé est écrit moins souvent après les 4 premières minutes.
+- Le mot de passe de session est protégé par PBKDF2-HMAC-SHA256 avec un sel aléatoire.
+
+## Bêta 16
+- Le bouton en bas à gauche ouvre un menu : mettre en veille, redémarrer ou éteindre.
+- Mot de passe de session, demandé à l'écran de verrouillage.
+- Plus de recherche de réseaux Wi-Fi pendant une connexion.
+
+## Bêta 15
+- Les réseaux Wi-Fi entendus une fois restent listés pendant 10 minutes.
+- Les recherches automatiques s'espacent progressivement.
+
+## Bêta 14
+- Les images de démarrage aux bonnes proportions sont utilisées même sans EDID.
+- La recherche Wi-Fi ne se lance plus pendant une connexion.
+
+## Bêta 13
+- Bouton d'arrêt sur le bureau.
+- Démarrage depuis une clé alors que TitanOs est aussi sur le disque : c'est bien la clé qui est utilisée.
+
+## Bêta 12
+- Écran de démarrage aux bonnes proportions quand le BIOS n'offre pas la résolution de l'écran.
+- Liste des disques corrigée.
+
+## Bêta 11
+- Installation sur une clé USB ou un autre disque, depuis n'importe quel TitanOs.
+
+## Bêta 10
+- Wi-Fi : les modules de chiffrement du noyau (CCM, GCM, CMAC…), indispensables au WPA2, sont inclus.
+
+## Bêta 9
+- Mises à jour en HTTPS avec `curl`, avec vérification des certificats.
+- Mot de passe Wi-Fi refusé signalé ; journal mis à jour pendant toute la session.
+
+## Bêta 8
+- Wi-Fi réglé pour la France (puissance et canaux complets).
+- Diagnostic précis quand Internet ne répond pas.
+
+## Bêta 7
+- Bouton *Afficher* pour le mot de passe Wi-Fi.
+- « Oublier ce réseau » corrigé.
+
+## Bêta 6
+- Mises à jour automatiques depuis GitHub.
+- Installation sur le disque interne.
+- Bureau plus fluide : ombres en cache, verre figé pendant un déplacement.
+
+## Bêta 5
+- Correction majeure : la liste des pilotes était lue deux fois, ce qui écrasait la mémoire. Aucun pilote ne se chargeait, d'où l'écran figé des premières bêtas.
+
+## Bêtas 3 et 4
+- Bêtas de diagnostic : ligne d'état à l'écran, journal sur la clé, rapport de plantage en mode de secours.
+
+## Bêta 2
+- Animation de démarrage propre à TitanOs : les crêtes.
+
+## Bêta 1
+- Première version : noyau Linux d'Alpine, chargeurs BIOS et UEFI, bureau liquid glass, applications, sons.

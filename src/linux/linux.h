@@ -14,6 +14,7 @@ bool display_open(void);
 void display_close(void);
 void display_present(const uint32_t *scene, int stride, rect_t r);
 int  display_w(void);
+int  display_hz(void);               /* fréquence de l écran */
 int  display_h(void);
 const char *display_driver(void);
 bool display_better_available(void);           /* une vraie carte graphique a pris le relais ? */
@@ -29,6 +30,7 @@ extern int input_screen_w, input_screen_h;
 
 /* audio.c, wifi.c */
 void audio_start(void);
+void volumes_poll(void);              /* clés USB : montage automatique */
 void hw_start(void);                 /* veilleur : Wi-Fi et batterie, hors du bureau */
 extern uint64_t display_us;          /* mesure du temps d envoi des images */
 void bat_read(battery_t *b);

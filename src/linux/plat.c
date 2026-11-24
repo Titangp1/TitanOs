@@ -1,5 +1,6 @@
 /* TitanOs - fonctions plat_*() du bureau, version Linux */
 #include "linux.h"
+#include "../core/desk.h"
 #include <asm/termios.h>
 #include <linux/input.h>
 
@@ -93,17 +94,22 @@ int plat_readfile(const char *path, char **data, size_t *len) {
     return 0;
 }
 
+/* écriture sûre : le fichier complet est d'abord écrit à côté, puis remplace l'ancien d'un
+ * coup (renommage). Une coupure de courant laisse l'ancien ou le nouveau, jamais un mélange. */
 int plat_writefile(const char *path, const void *data, size_t len) {
-    int fd = sys_open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    char tmp[600];
+    snprintf(tmp, sizeof tmp, "%s.tmp~", path);
+    int fd = sys_open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
     if (fd < 0) return -1;
     size_t done = 0;
     while (done < len) {
         long r = sys_write(fd, (const char *)data + done, len - done);
-        if (r <= 0) { sys_close(fd); return -1; }
+        if (r <= 0) { sys_close(fd); sys_unlink(tmp); return -1; }
         done += (size_t)r;
     }
-    sc1(__NR_fsync, fd);               /* sur une clé USB, on n'attend pas pour écrire */
+    sc1(__NR_fsync, fd);
     sys_close(fd);
+    if (sc4(__NR_renameat, AT_FDCWD, (long)tmp, AT_FDCWD, (long)path) != 0) { sys_unlink(tmp); return -1; }
     return 0;
 }
 
@@ -366,7 +372,8 @@ void plat_sysinfo(sysinfo_t *s) {
     strlcpy(s->gpu, g.name[0] ? g.name : "Inconnue", sizeof s->gpu);
     strlcpy(s->gpu_driver, g.driver[0] ? g.driver : "aucun (écran du BIOS)", sizeof s->gpu_driver);
     strlcpy(s->boot, path_exists("/sys/firmware/efi") ? "UEFI" : "BIOS", sizeof s->boot);
-    snprintf(s->display, sizeof s->display, "%d × %d (%s)", display_w(), display_h(), display_driver());
+    if (display_hz() > 0) snprintf(s->display, sizeof s->display, "%d × %d à %d Hz (%s)", display_w(), display_h(), display_hz(), display_driver());
+    else snprintf(s->display, sizeof s->display, "%d × %d (%s)", display_w(), display_h(), display_driver());
     s->cpu_temp = hwmon_temp("coretemp");
     s->gpu_temp = hwmon_temp("nouveau");
     if (read_file("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq", buf, sizeof buf) > 0) s->cpu_mhz = atoi(buf) / 1000;
@@ -498,6 +505,35 @@ void plat_power(int action) {
     sys_sync();
     sleep_ms(300);
     sys_reboot(action ? LINUX_REBOOT_CMD_RESTART : LINUX_REBOOT_CMD_POWER_OFF);
+}
+
+/* l'heure exacte (après synchronisation) est écrite dans l'horloge du PC, en temps
+ * universel : au prochain démarrage, Linux la relit telle quelle */
+void plat_rtc_save(void) {
+    struct timespec ts;
+    sys_clock_gettime(CLOCK_REALTIME, &ts);
+    datetime_t d;
+    datetime_from((int64_t)ts.tv_sec, &d);
+    struct { int sec, min, hour, mday, mon, year, wday, yday, isdst; } tm = {
+        d.sec, d.min, d.hour, d.day, d.month - 1, d.year - 1900, d.wday, 0, 0 };
+    int fd = sys_open("/dev/rtc0", O_RDONLY | O_CLOEXEC, 0);
+    if (fd < 0) return;
+    long r = sys_ioctl(fd, 0x4024700a /* RTC_SET_TIME */, &tm);
+    sys_close(fd);
+    klog("horloge du PC : %s (%04d-%02d-%02d %02d:%02d UTC)", r == 0 ? "mise à l'heure" : "écriture refusée",
+         d.year, d.month, d.day, d.hour, d.min);
+}
+
+void plat_random(void *buf, size_t n) {
+    if (sc3(__NR_getrandom, (long)buf, (long)n, 0) != (long)n) {
+        uint64_t x = plat_ms() * 6364136223846793005ull + 1442695040888963407ull;
+        for (size_t i = 0; i < n; i++) { x = x * 6364136223846793005ull + 1; ((uint8_t *)buf)[i] = (uint8_t)(x >> 56); }
+    }
+}
+
+void plat_suspend(void) {
+    sys_sync();
+    if (write_file("/sys/power/state", "mem") != 0) write_file("/sys/power/state", "freeze");
 }
 
 static char bl_dir[128];

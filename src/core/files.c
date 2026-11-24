@@ -9,7 +9,15 @@ typedef struct {
     char path[512];
     dirent_t *ent;
     int n, sel, hover, scroll, side_hover, bar_hover;
+    volume_t vols[6];
+    int nvols;
+    uint64_t next_vols;
 } files_t;
+
+/* lignes de la barre latérale : emplacements, puis clés USB (identifiants 100+i, éjecter 200+i) */
+static rect_t place_rect(int i) { return R(10, 36 + i * 38, SIDE_W - 20, 34); }
+static rect_t vol_rect(int i) { return R(10, 36 + 6 * 38 + 34 + i * 38, SIDE_W - 20, 34); }
+static rect_t eject_rect(int i) { rect_t r = vol_rect(i); return R(r.x + r.w - 32, r.y + 4, 26, 26); }
 
 static const char *const place_names[] = { "Accueil", "Documents", "Images", "Musique", "Téléchargements", "Système" };
 static const int place_icons[] = { ICON_HOME, ICON_FOLDER, ICON_IMAGE, ICON_FOLDER, ICON_FOLDER, ICON_DISK };
@@ -84,6 +92,7 @@ static void files_open_sel(window_t *w, files_t *f) {
     path_join(p, sizeof p, f->path, e->name);
     if (e->dir) files_go(w, f, p);
     else if (is_text(e)) app_notes_open(p);
+    else if (str_ends(e->name, ".png") || str_ends(e->name, ".PNG") || str_ends(e->name, ".bmp") || str_ends(e->name, ".BMP")) app_image_open(p);
     else dlg_message("Fichiers", "TitanOs ne sait pas encore ouvrir ce type de fichier.");
 }
 
@@ -194,12 +203,25 @@ static void files_draw(window_t *w, canvas_t *c) {
     for (int i = 0; i < countof(place_names); i++) {
         char p[512];
         place_path(i, p, sizeof p);
-        rect_t r = R(10, 36 + i * 38, SIDE_W - 20, 34);
+        rect_t r = place_rect(i);
         bool cur = !strcmp(p, f->path);
         if (cur) gfx_rrect(c, r.x, r.y, r.w, r.h, 10, (accent() & 0xFFFFFF) | 0xA0000000);
         else if (f->side_hover == i) gfx_rrect(c, r.x, r.y, r.w, r.h, 10, 0x1EFFFFFF);
         draw_icon(c, place_icons[i], r.x + 10, r.y + 7, 20);
         text_draw(c, &font_body, r.x + 40, r.y + 8, place_names[i], C_TEXT);
+    }
+    if (f->nvols) text_draw(c, &font_small, 20, vol_rect(0).y - 22, "PÉRIPHÉRIQUES", C_MUTED);
+    for (int i = 0; i < f->nvols; i++) {
+        rect_t r = vol_rect(i);
+        bool cur = str_starts(f->path, f->vols[i].path);
+        if (cur) gfx_rrect(c, r.x, r.y, r.w, r.h, 10, (accent() & 0xFFFFFF) | 0xA0000000);
+        else if (f->side_hover == 100 + i) gfx_rrect(c, r.x, r.y, r.w, r.h, 10, 0x1EFFFFFF);
+        draw_icon(c, ICON_USB, r.x + 10, r.y + 7, 20);
+        text_fit(c, &font_body, r.x + 40, r.y + 8, r.w - 80, f->vols[i].name, C_TEXT);
+        rect_t e = eject_rect(i);
+        if (f->side_hover == 200 + i) gfx_circle(c, e.x + 13, e.y + 13, 13, 0x30FFFFFF);
+        gfx_tri(c, e.x + 13, e.y + 6, e.x + 6, e.y + 15, e.x + 20, e.y + 15, 0xFFE2E8F0, 0xFFE2E8F0);   /* symbole Éjecter */
+        gfx_fill(c, R(e.x + 6, e.y + 18, 14, 2), 0xFFE2E8F0);
     }
     char st[96];
     snprintf(st, sizeof st, "Stockage : %s", plat_storage());
@@ -253,7 +275,8 @@ static void files_event(window_t *w, const event_t *e) {
     if (row_at >= f->n) row_at = -1;
     if (e->type == EV_MOTION) {
         int sh = -1, bh = -1;
-        for (int i = 0; i < countof(place_names); i++) if (rect_has(R(10, 36 + i * 38, SIDE_W - 20, 34), e->x, e->y)) sh = i;
+        for (int i = 0; i < countof(place_names); i++) if (rect_has(place_rect(i), e->x, e->y)) sh = i;
+        for (int i = 0; i < f->nvols; i++) if (rect_has(vol_rect(i), e->x, e->y)) sh = rect_has(eject_rect(i), e->x, e->y) ? 200 + i : 100 + i;
         for (int i = 0; i < 3; i++) if (rect_has(bar_btn(c, i), e->x, e->y)) bh = i;
         if (sh != f->side_hover || bh != f->bar_hover || row_at != f->hover) {
             f->side_hover = sh; f->bar_hover = bh; f->hover = row_at;
@@ -269,7 +292,19 @@ static void files_event(window_t *w, const event_t *e) {
     cur_win = w;
     if (e->type == EV_BUTTON && e->down) {
         if ((f->side_hover >= 0 || f->bar_hover >= 0) && e->button == BTN_LEFT) sound_play(SFX_CLICK);
-        if (f->side_hover >= 0 && e->button == BTN_LEFT) {
+        if (f->side_hover >= 200 && f->side_hover < 200 + f->nvols && e->button == BTN_LEFT) {
+            volume_t *v = &f->vols[f->side_hover - 200];
+            char msg[96];
+            if (plat_eject(v->path)) { snprintf(msg, sizeof msg, "« %s » peut être retiré.", v->name); if (str_starts(f->path, v->path)) files_go(w, f, plat_home()); }
+            else snprintf(msg, sizeof msg, "« %s » est encore utilisé : fermez ses fichiers.", v->name);
+            wm_toast(msg);
+            f->nvols = plat_volumes(f->vols, 6);
+            f->side_hover = -1;
+            wm_invalidate(w);
+            return;
+        }
+        if (f->side_hover >= 100 && f->side_hover < 100 + f->nvols && e->button == BTN_LEFT) { files_go(w, f, f->vols[f->side_hover - 100].path); return; }
+        if (f->side_hover >= 0 && f->side_hover < countof(place_names) && e->button == BTN_LEFT) {
             char p[512];
             place_path(f->side_hover, p, sizeof p);
             if (!plat_exists(p, NULL)) plat_mkdir(p);
@@ -315,6 +350,19 @@ static void files_event(window_t *w, const event_t *e) {
     wm_invalidate(w);
 }
 
+static void files_tick(window_t *w, uint64_t now) {
+    files_t *f = w->data;
+    if (now < f->next_vols) return;
+    f->next_vols = now + 2000;
+    volume_t v[6];
+    int n = plat_volumes(v, 6);
+    if (n != f->nvols || memcmp(v, f->vols, sizeof(volume_t) * (size_t)n)) {
+        memcpy(f->vols, v, sizeof(volume_t) * (size_t)n);
+        f->nvols = n;
+        wm_invalidate(w);
+    }
+}
+
 static void files_close(window_t *w) {
     files_t *f = w->data;
     if (cur_win == w) cur_win = NULL;
@@ -333,5 +381,6 @@ void app_files_open(const char *path) {
     w->draw = files_draw;
     w->event = files_event;
     w->on_close = files_close;
+    w->tick = files_tick;
     files_go(w, f, path ? path : plat_home());
 }

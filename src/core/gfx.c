@@ -291,6 +291,30 @@ void gfx_blit_rect(canvas_t *dst, int x, int y, const canvas_t *src, rect_t sr, 
     }
 }
 
+/* zone sr de src, étirée dans le rectangle (x, y, w, h) : au plus proche voisin, assez
+ * rapide pour animer une fenêtre entière à chaque image */
+void gfx_blit_scaled(canvas_t *dst, float x, float y, float w, float h, const canvas_t *src, rect_t sr, int alpha) {
+    sr = rect_isect(sr, R(0, 0, src->w, src->h));
+    if (w < 1 || h < 1 || alpha <= 0 || rect_empty(sr)) return;
+    int x0 = (int)floorf(x), y0 = (int)floorf(y);
+    rect_t k = rect_isect(R(x0, y0, (int)ceilf(x + w) - x0, (int)ceilf(y + h) - y0), dst->clip);
+    if (rect_empty(k)) return;
+    int64_t step = (int64_t)((float)sr.w / w * 65536.0f);
+    for (int j = k.y; j < k.y + k.h; j++) {
+        int sy = sr.y + (int)(((float)j + 0.5f - y) * (float)sr.h / h);
+        if (sy < sr.y || sy >= sr.y + sr.h) continue;
+        const uint32_t *srow = src->px + (size_t)sy * src->stride;
+        uint32_t *dp = dst->px + (size_t)j * dst->stride;
+        int64_t u = (int64_t)((((float)k.x + 0.5f - x) * (float)sr.w / w) * 65536.0f);
+        for (int i = k.x; i < k.x + k.w; i++, u += step) {
+            int sx = sr.x + (int)(u >> 16);
+            if (sx < sr.x || sx >= sr.x + sr.w) continue;
+            uint32_t p = srow[sx];
+            dp[i] = over(dp[i], alpha >= 255 ? p : pm_scale(p, (uint32_t)alpha));
+        }
+    }
+}
+
 void gfx_blit(canvas_t *dst, int x, int y, const canvas_t *src, int alpha) {
     gfx_blit_rect(dst, x, y, src, R(0, 0, src->w, src->h), alpha);
 }

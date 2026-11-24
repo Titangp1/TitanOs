@@ -24,7 +24,7 @@ CMDLINE = "quiet loglevel=3 vt.global_cursor_default=0 consoleblank=0 nowatchdog
 # Pilotes embarqués (leurs dépendances sont ajoutées automatiquement)
 MODULES = [
     # carte graphique du VAIO (NVIDIA), QEMU ; ailleurs, l'écran du BIOS (simpledrm) suffit
-    "nouveau", "bochs", "virtio_gpu",
+    "nouveau", "i915", "bochs", "virtio_gpu",
     # clavier, souris, pavés tactiles, couvercle et bouton d'alimentation, touches Fn du VAIO
     "evdev", "psmouse", "hid_generic", "usbhid", "hid_multitouch", "i2c_hid_acpi", "hid_apple",
     "hid_logitech_dj", "hid_logitech_hidpp", "hid_microsoft", "elan_i2c", "button", "video", "sony_laptop",
@@ -36,8 +36,9 @@ MODULES = [
     "snd_hda_codec_idt", "snd_hda_codec_analog", "snd_hda_codec_hdmi", "snd_hda_codec_nvhdmi",
     "snd_hda_codec_intelhdmi",
     # USB et stockage (la clé TITANOS), systèmes de fichiers
+    "zram",
     "ehci_pci", "ohci_pci", "uhci_hcd", "xhci_pci", "usb_storage", "uas", "sd_mod", "ahci", "ata_piix",
-    "virtio_blk", "virtio_pci", "vfat", "nls_cp437", "nls_utf8", "nls_iso8859_1", "ext4", "overlay",
+    "virtio_blk", "virtio_pci", "vfat", "exfat", "ntfs3", "nls_cp437", "nls_utf8", "nls_iso8859_1", "ext4", "overlay",
     # réseau : Ethernet du VAIO (Marvell), Intel, Realtek, partage USB des téléphones, VM
     "sky2", "e1000", "e1000e", "r8169", "rndis_host", "cdc_ether", "cdc_ncm", "r8152", "ax88179_178a",
     "asix", "virtio_net", "af_packet",
@@ -344,7 +345,7 @@ def build(repo, B):
 
     print("[image disque]")
     import mkimage
-    readme = ("TitanOs beta 15 - systeme d'exploitation sur base Linux\r\n\r\n"
+    readme = ("TitanOs beta 17 - systeme d'exploitation sur base Linux\r\n\r\n"
               "TITANOS\\VMLINUZ     noyau Linux\r\n"
               "TITANOS\\INITRD.IMG  systeme TitanOs (bureau, pilotes, BusyBox)\r\n"
               "EFI\\BOOT\\BOOTX64.EFI chargeur UEFI (Secure Boot desactive)\r\n"
@@ -360,6 +361,6 @@ def build(repo, B):
     write_update(out, info, s2, vmlinuz, initrd, bootimg.build(ttc))
     print(f"  noyau au secteur {info['kernel_lba']}, initramfs au secteur {info['initrd_lba']}, "
           f"chargé à {info['initrd_addr'] >> 20} Mo ; {info['free_mb']} Mo libres pour vos fichiers")
-    print(f"\nTitanOs bêta 15 est prêt :")
+    print(f"\nTitanOs bêta 17 est prêt :")
     print(f"  build/titanos.img   image pour clé USB ({DISK_MB} Mo, démarre en BIOS et en UEFI)")
     print(f"  build/titanos.vhd   disque virtuel (VirtualBox, Hyper-V génération 1)")

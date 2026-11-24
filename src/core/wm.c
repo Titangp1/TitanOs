@@ -16,15 +16,16 @@ static canvas_t *T;                       /* où l'on dessine : la scène ou le 
 static int wall_id = -1;
 static uint64_t now;
 
-/* durées (ms) */
-#define T_WIN_IN   230
+/* durées (ms) : courtes à l'ouverture, un peu plus longues quand la fenêtre voyage */
+#define T_WIN_IN   240
 #define T_WIN_OUT  170
-#define T_MIN      220
+#define T_MIN      300
+#define T_MAX      230
 #define T_EL_IN    190
 #define T_EL_OUT   140
 #define T_TRANS    480
 
-enum { A_NONE, A_OPEN, A_CLOSE, A_MIN };
+enum { A_NONE, A_OPEN, A_CLOSE, A_MIN, A_RESTORE, A_MAX };
 
 /* ---------------- état ---------------- */
 #define MAX_WIN 24
@@ -52,6 +53,8 @@ static void draw_shadow(canvas_t *dst, shadow_t *s, rect_t r, float radius, floa
 }
 
 typedef struct { rect_t r; bool ok, shown, leaving; canvas_t cache; int level; uint64_t t0; shadow_t sh; } glass_el_t;
+static field_t lock_pw;                    /* mot de passe tapé à l'écran de verrouillage */
+static bool lock_bad;
 static glass_el_t g_power, g_dock, g_tray, g_menu, g_cal, g_pop, g_toast, g_osd, g_avatar, g_hint;
 
 /* transitions plein écran : l'ancienne image (snap) s'efface par-dessus la nouvelle */
@@ -105,6 +108,7 @@ static bool bat_warned;
 static float clamp01(float v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
 static float ease_out(float p) { p = 1 - clamp01(p); return 1 - p * p * p; }
 static float ease_in(float p) { p = clamp01(p); return p * p; }
+static float ease_in_out(float p) { p = clamp01(p); return p < 0.5f ? 4 * p * p * p : 1 - (-2 * p + 2) * (-2 * p + 2) * (-2 * p + 2) / 2; }
 static float progress(uint64_t t0, int dur) { return now <= t0 ? 0 : clamp01((float)(now - t0) / dur); }
 
 /* ---------------- zones abîmées ---------------- */
@@ -352,6 +356,31 @@ static void focus_next(void) {
     if (focused) damage(win_outer(focused), win_level(focused));
 }
 
+/* fermeture demandée par l'utilisateur : la fenêtre peut d'abord demander confirmation */
+void wm_request_close(window_t *w) {
+    if (!alive(w)) return;
+    if (w->can_close && !w->can_close(w)) return;
+    wm_close(w);
+}
+
+/* Impr. écran : l'écran entier enregistré en PNG dans Images */
+size_t png_encode(const uint32_t *px, int w, int h, int stride, uint8_t **out);
+static void screenshot(void) {
+    uint8_t *png;
+    size_t n = png_encode(scene.px, scr_w, scr_h, scene.stride, &png);
+    if (!n) { wm_toast("Capture impossible : mémoire insuffisante."); return; }
+    datetime_t d;
+    local_now(&d);
+    char dir[400], path[512];
+    snprintf(dir, sizeof dir, "%s/Images", plat_home());
+    plat_mkdir(dir);
+    snprintf(path, sizeof path, "%s/Capture %04d-%02d-%02d %02dh%02d %02d.png", dir, d.year, d.month, d.day, d.hour, d.min, d.sec);
+    int r = plat_writefile(path, png, n);
+    free(png);
+    sound_play(r == 0 ? SFX_NOTIFY : SFX_ERROR);
+    wm_toast(r == 0 ? "Capture d'écran enregistrée dans Images." : "Impossible d'enregistrer la capture.");
+}
+
 void wm_close(window_t *w) {
     if (!alive(w)) return;
     for (int i = 0; i < MAX_WIN; i++)          /* ses dialogues partent avec elle */
@@ -398,7 +427,7 @@ window_t *wm_focused(void) { return focused; }
 
 void wm_focus(window_t *w) {
     if (!alive(w)) return;
-    if (w->minimized || w->anim == A_MIN) { w->minimized = false; w->anim = A_OPEN; w->anim_t0 = now; }
+    if (w->minimized || w->anim == A_MIN) { w->minimized = false; w->anim = A_RESTORE; w->anim_t0 = now; }
     int idx = (int)(w - wins), k = 0;
     if (zn && zord[zn - 1] == idx && focused == w) return;
     for (int i = 0; i < zn; i++) if (zord[i] != idx) zord[k++] = zord[i];
@@ -448,8 +477,11 @@ void wm_resize(window_t *w, int cw, int ch) {
 
 static void toggle_max(window_t *w) {
     if (!(w->flags & WF_RESIZABLE)) return;
+    w->anim_from = w->r;
     if (w->maximized) { w->maximized = false; set_rect(w, w->restore); }
     else { w->restore = w->r; w->maximized = true; set_rect(w, R(8, 8, scr_w - 16, scr_h - DOCK_H - 30)); }
+    w->anim = A_MAX;
+    w->anim_t0 = now;
 }
 
 /* ---------------- divers ---------------- */
@@ -532,6 +564,18 @@ static void snapshot(void) {
     memcpy(snap.px, scene.px, (size_t)scr_w * scr_h * 4);
 }
 
+/* mise en veille : la session se verrouille d'abord, l'écran de verrouillage attend au réveil */
+void wm_suspend(void) {
+    settings_save();
+    wm_lock();
+    trans = TR_NONE;
+    damage_all();
+    core_frame();
+    plat_suspend();
+    now = plat_ms();
+    damage_all();
+}
+
 void wm_lock(void) {
     if (mode != MODE_DESK) return;
     close_menu();
@@ -540,6 +584,8 @@ void wm_lock(void) {
     capture = NULL;
     drag_kind = DR_NONE;
     snapshot();                              /* le bureau s'efface sous l'écran de verrouillage */
+    ui_field_set(&lock_pw, "");
+    lock_bad = false;
     mode = MODE_LOCK;
     trans = TR_FADE;
     trans_t0 = now;
@@ -548,6 +594,7 @@ void wm_lock(void) {
 }
 
 static void draw_lock(void);
+static rect_t lock_field_rect(void) { return R(scr_w / 2 - 170, scr_h / 2 + 110 + 112, 340, 44); }
 static void unlock(void) {
     /* l'écran de verrouillage glisse vers le haut en s'effaçant */
     if (snap.w != scr_w || snap.h != scr_h) { canvas_free(&snap); snap = canvas_new(scr_w, scr_h); }
@@ -697,6 +744,67 @@ static void draw_win_button(window_t *w, int b, bool active) {
     }
 }
 
+/* icône du dock d'une fenêtre : là où elle part quand on la réduit */
+static rect_t dock_icon_of(window_t *w) {
+    for (int i = 0; i < dock_n; i++) if (dock_items[i].win == w) return dock_item_rect(i);
+    for (int i = 0; i < dock_n; i++) if (dock_items[i].icon == w->icon) return dock_item_rect(i);
+    rect_t d = dock_rect();
+    return R(d.x + d.w / 2 - 24, d.y, 48, 48);
+}
+
+static float lerpf(float a, float b, float t) { return a + (b - a) * t; }
+
+/* où et comment poser l'image d'une fenêtre animée : zoom à l'ouverture et à la fermeture,
+ * voyage vers l'icône du dock (réduction) et retour, passage d'une taille à l'autre */
+static void anim_geom(window_t *w, rect_t S, float *x, float *y, float *ww, float *hh, float *a) {
+    float cx = w->r.x + w->r.w / 2.0f, cy = w->r.y + w->r.h / 2.0f, s = 1;
+    *a = 1;
+    if (w->anim == A_OPEN) {
+        float p = ease_out(progress(w->anim_t0, T_WIN_IN));
+        s = 0.92f + 0.08f * p;
+        *a = p;
+    } else if (w->anim == A_CLOSE) {
+        float p = ease_in(progress(w->anim_t0, T_WIN_OUT));
+        s = 1 - 0.06f * p;
+        *a = 1 - p;
+    } else if (w->anim == A_MIN || w->anim == A_RESTORE) {
+        float p = progress(w->anim_t0, T_MIN);
+        if (w->anim == A_RESTORE) p = 1 - p;
+        p = ease_in_out(p);
+        rect_t ic = dock_icon_of(w);
+        float tx = ic.x + ic.w / 2.0f, ty = ic.y + ic.h / 2.0f;
+        float ts = (float)ic.w / (float)MAX(w->r.w, w->r.h);
+        s = lerpf(1, ts, p);
+        cx = lerpf(cx, tx, p);
+        cy = lerpf(cy, ty, p);
+        *a = 1 - 0.85f * p * p;
+    } else if (w->anim == A_MAX) {
+        float p = ease_out(progress(w->anim_t0, T_MAX));
+        rect_t F = w->anim_from;
+        /* le cadre passe de l'ancien rectangle au nouveau ; l'image (nouvelle taille) suit */
+        float fx = lerpf((float)F.x, (float)w->r.x, p), fy = lerpf((float)F.y, (float)w->r.y, p);
+        float fw = lerpf((float)F.w, (float)w->r.w, p), fh = lerpf((float)F.h, (float)w->r.h, p);
+        float sx = fw / w->r.w, sy = fh / w->r.h;
+        *x = fx + (S.x - w->r.x) * sx;
+        *y = fy + (S.y - w->r.y) * sy;
+        *ww = S.w * sx;
+        *hh = S.h * sy;
+        return;
+    }
+    *x = cx + (S.x - (w->r.x + w->r.w / 2.0f)) * s;
+    *y = cy + (S.y - (w->r.y + w->r.h / 2.0f)) * s;
+    *ww = S.w * s;
+    *hh = S.h * s;
+}
+
+/* zone de l'écran touchée par l'animation d'une fenêtre (à redessiner à chaque image) */
+static rect_t anim_area(window_t *w) {
+    rect_t o = win_outer(w);
+    if (w->anim == A_MIN || w->anim == A_RESTORE) return rect_union(o, rect_grow(dock_rect(), 30));
+    if (w->anim == A_MAX) return rect_union(o, rect_grow(w->anim_from, 60));
+    return o;
+}
+
 static window_t *cur_win;
 static shadow_t win_shadow[MAX_WIN];
 static void draw_window_body(void) {
@@ -723,15 +831,10 @@ static void draw_window(window_t *w) {
         scene.clip = old;
         w->glass_ok = true;
     }
-    float a = 1;
-    int dy = 0;
-    if (w->anim == A_OPEN) { float p = ease_out(progress(w->anim_t0, T_WIN_IN)); a = p; dy = (int)((1 - p) * 18); }
-    else if (w->anim == A_CLOSE) { float p = progress(w->anim_t0, T_WIN_OUT); a = 1 - ease_in(p); dy = (int)(p * 12); }
-    else if (w->anim == A_MIN) { float p = progress(w->anim_t0, T_MIN); a = 1 - ease_in(p); dy = (int)(ease_in(p) * 80); }
     cur_win = w;
-    if (!w->anim || a >= 0.997f) { with_layer(win_outer(w), a, dy, draw_window_body); return; }
+    if (!w->anim) { with_layer(win_outer(w), 1, 0, draw_window_body); return; }
     /* animation : la fenêtre est dessinée une fois dans un calque à part, puis seulement
-     * posée avec sa transparence et son décalage à chaque image */
+     * posée, agrandie ou réduite, avec sa transparence, à chaque image */
     static canvas_t wl;
     static window_t *wl_win;
     static uint64_t wl_t0;
@@ -747,7 +850,9 @@ static void draw_window(window_t *w) {
         T = old;
         wl_win = w; wl_t0 = w->anim_t0; wl_r = w->r;
     }
-    gfx_blit_rect(&scene, area.x, area.y + dy, &wl, area, (int)(a * 255));
+    float x, y, ww, hh, a;
+    anim_geom(w, area, &x, &y, &ww, &hh, &a);
+    gfx_blit_scaled(&scene, x, y, ww, hh, &wl, area, (int)(a * 255));
 }
 
 static void draw_dock_body(void) {
@@ -788,6 +893,13 @@ static void draw_tooltip(void) {
     gfx_rrect(T, b.x, b.y, b.w, b.h, 9, 0xD80F172A);
     gfx_rrect_stroke(T, b.x, b.y, b.w, b.h, 9, 1, 0x30FFFFFF);
     text_center(T, &font_body, b, t, C_TEXT);
+}
+
+void wm_suspend(void);
+static void power_menu_cb(int i, void *ctx) {
+    (void)ctx;
+    if (i == 0) wm_suspend();
+    else wm_power(i == 1 ? 1 : 0);
 }
 
 static void draw_power(void) {
@@ -1002,10 +1114,24 @@ static void draw_lock(void) {
     char dg[200];
     plat_diag(dg, sizeof dg);
     if (dg[0]) text_draw(T, &font_small, (scr_w - text_width(&font_small, dg)) / 2, scr_h - 34, dg, 0xB3FFFFFF);
-    const char *hint = "Cliquez ou appuyez sur une touche pour ouvrir la session";
-    int hw = text_width(&font_body, hint) + 48;
-    draw_glass(&g_hint, R((scr_w - hw) / 2, ay + 112, hw, 44), 22, 0);
-    text_center(T, &font_body, R((scr_w - hw) / 2, ay + 112, hw, 44), hint, C_TEXT);
+    if (g_set.pass[0]) {                    /* mot de passe demandé */
+        rect_t f = lock_field_rect();
+        draw_glass(&g_hint, f, 22, 0);
+        lock_pw.secret = true;
+        lock_pw.focus = true;
+        if (lock_pw.s[0]) ui_field(T, f, &lock_pw, NULL);
+        else {
+            text_center(T, &font_body, f, "Mot de passe", C_MUTED);
+            gfx_fill(T, R(f.x + 20, f.y + 12, 2, 20), accent());
+        }
+        const char *m = lock_bad ? "Mot de passe incorrect" : "Entrée pour ouvrir la session";
+        text_center(T, &font_small, R(0, f.y + f.h + 10, scr_w, 18), m, lock_bad ? 0xFFFCA5A5 : 0xB3FFFFFF);
+    } else {
+        const char *hint = "Cliquez ou appuyez sur une touche pour ouvrir la session";
+        int hw = text_width(&font_body, hint) + 48;
+        draw_glass(&g_hint, R((scr_w - hw) / 2, ay + 112, hw, 44), 22, 0);
+        text_center(T, &font_body, R((scr_w - hw) / 2, ay + 112, hw, 44), hint, C_TEXT);
+    }
     if (bat.present) {
         char b[24];
         snprintf(b, sizeof b, "%d %%", bat.percent);
@@ -1326,7 +1452,7 @@ static void click_desktop(int x, int y, int button, bool dbl) {
 static void dock_menu_cb(int i, void *ctx) {
     dock_item_t *it = ctx;
     if (i == 0) app_open(it->icon);
-    else if (i == 1 && alive(it->win)) wm_close(it->win);
+    else if (i == 1 && alive(it->win)) wm_request_close(it->win);
 }
 
 static void battery_toast(void) {
@@ -1347,7 +1473,7 @@ static void mouse_button(const event_t *e) {
         last_click_y = my;
     }
     if (mode == MODE_LOCK) {
-        if (e->down && !trans) unlock();
+        if (e->down && !trans && !g_set.pass[0]) unlock();
         return;
     }
     if (mode != MODE_DESK) return;
@@ -1403,7 +1529,13 @@ static void mouse_button(const event_t *e) {
         }
         return;
     }
-    if (rect_has(power_rect(), mx, my)) { sound_play(SFX_CLICK); wm_power(0); return; }
+    if (rect_has(power_rect(), mx, my)) {
+        sound_play(SFX_CLICK);
+        static const char *const items[] = { "Mettre en veille", "Redémarrer", "Éteindre" };
+        rect_t r = power_rect();
+        wm_menu(r.x, r.y - 8, items, 3, power_menu_cb, NULL);
+        return;
+    }
     if (rect_has(tray_rect(), mx, my)) {
         if (tray_hover == TP_CLOCK) toggle_cal();
         else if (tray_hover == TP_KBD) { sound_play(SFX_CLICK); wm_kbd_layout_toggle(); }
@@ -1418,7 +1550,7 @@ static void mouse_button(const event_t *e) {
         if (w != focused || zord[zn - 1] != (int)(w - wins)) wm_focus(w);
         for (int b = HV_CLOSE; b <= HV_MIN; b++)
             if (has_btn(w, b) && rect_has(win_btn(w, b), mx, my) && e->button == BTN_LEFT) {
-                if (b == HV_CLOSE) wm_close(w);
+                if (b == HV_CLOSE) wm_request_close(w);
                 else if (b == HV_MAX) { sound_play(SFX_CLICK); toggle_max(w); }
                 else minimize(w);
                 return;
@@ -1527,12 +1659,25 @@ void core_event(const event_t *e) {
             return;
         }
         }
-        if (mode == MODE_LOCK) { if (!trans) unlock(); return; }
+        if (mode == MODE_LOCK) {
+            if (trans) return;
+            if (!g_set.pass[0]) { unlock(); return; }
+            if (e->key == K_ENTER) {
+                bool good = settings_pass_check(lock_pw.s);
+                ui_field_set(&lock_pw, "");
+                if (good) { lock_bad = false; unlock(); }
+                else { lock_bad = true; sound_play(SFX_ERROR); }
+            } else if (e->key == K_ESC) ui_field_set(&lock_pw, "");
+            else { ui_field_key(&lock_pw, e); lock_bad = false; }
+            damage(R(0, lock_field_rect().y - 40, scr_w, 120), 0);
+            return;
+        }
         if (pop_open && e->key == K_ESC) { close_pop(); return; }
         if (menu_open) { menu_key(e); return; }
         if (e->key == K_SUPER) { open_menu(); return; }
         if ((e->mods & MOD_ALT) && e->key == K_TAB) { cycle_windows(); return; }
-        if ((e->mods & MOD_ALT) && e->key == K_F4) { if (alive(focused)) wm_close(focused); return; }
+        if ((e->mods & MOD_ALT) && e->key == K_F4) { if (alive(focused)) wm_request_close(focused); return; }
+        if (e->key == K_PRINT) { screenshot(); return; }
         if ((e->mods & (MOD_CTRL | MOD_ALT)) == (MOD_CTRL | MOD_ALT) && e->key == K_CHAR && (e->ch == 't' || e->ch == 'T')) {
             app_terminal_open();
             return;
@@ -1634,6 +1779,35 @@ void core_start(void) {
     sound_play(SFX_STARTUP);
 }
 
+/* heure par Internet : une fois par démarrage, dès qu'une connexion existe ; l'horloge du PC
+ * reçoit ensuite l'heure exacte (en temps universel), elle ne dérive donc plus au redémarrage */
+static void time_sync(bool online) {
+    static int job = -1;
+    static bool done;
+    static uint64_t next_try;
+    if (job >= 0) {
+        char out[128];
+        int r = plat_spawn_poll(job, out, sizeof out);
+        if (r == -1) return;
+        job = -1;
+        if (r == 0) {
+            done = true;
+            g_set.rtc_local = false;           /* l'heure système est maintenant en temps universel */
+            settings_save();
+            plat_rtc_save();
+            local_now(&now_dt);
+            if (mode == MODE_LOCK) damage_all(); else damage(tray_rect(), 100);
+        } else next_try = now + 120000;
+        return;
+    }
+    if (done || !online || now < next_try) return;
+    static const char *const argv[] = { "/bin/busybox", "ntpd", "-n", "-q", "-p", "pool.ntp.org", NULL };
+    job = plat_spawn(argv);
+    next_try = now + 120000;
+}
+
+
+
 static void poll_hardware(void) {
     static uint64_t next, next_update;
     static int last_upd = UPD_IDLE;
@@ -1669,6 +1843,7 @@ static void poll_hardware(void) {
     bat = b;
     wifi_state = ws;
     wifi_signal = sig;
+    time_sync(ws == WIFI_CONNECTED || wired);
     strlcpy(wifi_ssid, ssid, sizeof wifi_ssid);
     net_wired = wired;
     if (changed) damage(rect_grow(tray_rect(), 30), mode == MODE_DESK ? 100 : 0);
@@ -1715,13 +1890,13 @@ int core_frame(void) {
     for (int i = 0; i < MAX_WIN; i++) {
         window_t *w = &wins[i];
         if (!w->used || !w->anim) continue;
-        int dur = w->anim == A_OPEN ? T_WIN_IN : w->anim == A_CLOSE ? T_WIN_OUT : T_MIN;
-        damage(win_outer(w), w->anim == A_OPEN ? win_level(w) : 0);
+        int dur = w->anim == A_OPEN ? T_WIN_IN : w->anim == A_CLOSE ? T_WIN_OUT : w->anim == A_MAX ? T_MAX : T_MIN;
+        damage(anim_area(w), 0);
         anim = true;
         if (now - w->anim_t0 >= (uint64_t)dur) {
             if (w->anim == A_CLOSE) finish_close(w);
-            else if (w->anim == A_MIN) { w->minimized = true; w->anim = A_NONE; damage(win_outer(w), 0); }
-            else w->anim = A_NONE;
+            else if (w->anim == A_MIN) { w->minimized = true; w->anim = A_NONE; damage(anim_area(w), 0); }
+            else { damage(anim_area(w), 0); w->anim = A_NONE; }
         }
     }
     /* dock : les icônes survolées grandissent en douceur */

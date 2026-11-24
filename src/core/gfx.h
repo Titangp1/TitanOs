@@ -33,6 +33,7 @@ void gfx_tri(canvas_t *c, float x0, float y0, float x1, float y1, float x2, floa
 void gfx_shadow(canvas_t *c, float x, float y, float w, float h, float r, float blur, float dy, uint32_t argb);   /* ombre décalée de dy sous la forme */
 void gfx_blit(canvas_t *dst, int x, int y, const canvas_t *src, int alpha);
 void gfx_blit_rect(canvas_t *dst, int x, int y, const canvas_t *src, rect_t sr, int alpha);
+void gfx_blit_scaled(canvas_t *dst, float x, float y, float w, float h, const canvas_t *src, rect_t sr, int alpha);
 void gfx_copy(canvas_t *dst, int x, int y, const canvas_t *src, rect_t sr);
 
 int  text_width(const font_t *f, const char *s);

@@ -112,6 +112,7 @@ static int special_key(int code) {
     case KEY_VOLUMEUP: return K_VOL_UP;
     case KEY_VOLUMEDOWN: return K_VOL_DOWN;
     case KEY_MUTE: return K_MUTE;
+    case KEY_SYSRQ: case KEY_PRINT: return K_PRINT;
     case KEY_KPSLASH: return K_CHAR;
     }
     if (code >= KEY_F1 && code <= KEY_F10) return K_F1 + (code - KEY_F1);

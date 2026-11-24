@@ -25,8 +25,8 @@ typedef __builtin_va_list va_list;
 #define false 0
 #define NULL  ((void *)0)
 
-#define TITANOS_VERSION "Bêta 15"
-#define TITANOS_BUILD   15             /* numéro de version, comparé aux mises à jour publiées */
+#define TITANOS_VERSION "Bêta 17"
+#define TITANOS_BUILD   17             /* numéro de version, comparé aux mises à jour publiées */
 #define countof(a) ((int)(sizeof(a) / sizeof((a)[0])))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -92,6 +92,7 @@ enum {
     K_PGUP, K_PGDN, K_LEFT, K_RIGHT, K_UP, K_DOWN,
     K_F1, K_F2, K_F3, K_F4, K_F5, K_F6, K_F7, K_F8, K_F9, K_F10, K_F11, K_F12,
     K_SUPER, K_POWER, K_BRIGHT_UP, K_BRIGHT_DOWN, K_VOL_UP, K_VOL_DOWN, K_MUTE, K_LID_CLOSE,
+    K_PRINT,
 };
 typedef struct {
     int  type;
@@ -149,6 +150,11 @@ bool  plat_kill(int pid);
 typedef struct { char name[16], mac[18], ip[16], kind[16]; bool up, carrier; } netif_t;
 int   plat_netifs(netif_t *list, int max);
 void  plat_power(int action);                               /* 0 éteindre, 1 redémarrer */
+void  plat_suspend(void);                                   /* mise en veille */
+int   plat_volumes(void *list, int max);                  /* volumes branchés (volume_t) */
+bool  plat_eject(const char *path);                       /* démonte un volume */
+void  plat_random(void *buf, size_t n);                    /* octets aléatoires */
+void  plat_rtc_save(void);                                  /* heure système -> horloge du PC (UTC) */
 int   plat_brightness(int set);                             /* set<0 : lecture ; 0-100 ou -1 */
 void  plat_sync(void);
 

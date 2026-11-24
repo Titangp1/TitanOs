@@ -38,7 +38,10 @@ typedef struct {
     bool sounds;          /* sons de l'interface */
     int  volume;          /* volume général, 0-100 */
     int  pointer;         /* vitesse du pointeur, 1-5 */
+    char pass[64];        /* empreinte du mot de passe de session (vide : aucun) */
 } settings_t;
+void settings_pass_hash(const char *pw, char out[64]);   /* empreinte d'un mot de passe */
+bool settings_pass_check(const char *pw);                /* le mot de passe correspond-il ? */
 extern settings_t g_set;
 void     settings_load(void);
 void     settings_save(void);
@@ -71,6 +74,7 @@ struct window {
     char     title[80];
     int      icon;
     rect_t   r, restore;            /* cadre complet, à l'écran */
+    rect_t   anim_from;             /* cadre de départ d'une animation (agrandissement) */
     int      minw, minh;
     canvas_t surf;                  /* contenu (zone client) */
     canvas_t glass;                 /* verre en cache */
@@ -81,11 +85,13 @@ struct window {
     void   (*event)(window_t *w, const event_t *e);
     void   (*tick)(window_t *w, uint64_t now);
     void   (*on_close)(window_t *w);
+    bool   (*can_close)(window_t *w);  /* false : la fenêtre s'en occupe (demande de confirmation) */
 };
 
 extern int  scr_w, scr_h;
 window_t *wm_open(const char *title, int icon, int w, int h, unsigned flags);
 void      wm_close(window_t *w);
+void      wm_request_close(window_t *w);   /* comme un clic sur ×  (peut demander confirmation) */
 void      wm_invalidate(window_t *w);
 void      wm_set_title(window_t *w, const char *t);
 void      wm_resize(window_t *w, int client_w, int client_h);
@@ -97,6 +103,7 @@ void      wm_toast(const char *msg);
 void      core_hold(bool hold);       /* garder l'écran tel quel (démarrage) */
 void      wm_menu(int x, int y, const char *const *items, int n, void (*cb)(int i, void *ctx), void *ctx);
 void      wm_lock(void);
+void      wm_suspend(void);
 void      wm_theme_changed(void);
 void      wm_power(int action);          /* 0 éteindre, 1 redémarrer, avec confirmation */
 void      clip_set(const char *s, int n);
@@ -149,3 +156,5 @@ void app_network_open(void);
 void app_snake_open(void);
 void app_about_open(void);
 void app_update_open(void);
+void app_image_open(const char *path);
+typedef struct { char name[48]; char path[96]; } volume_t;      /* clé USB ou disque branché */

@@ -35,7 +35,7 @@ FIN
 
 if [ -t 1 ] && [ -z "$TITANOS_BIENVENUE" ]; then
     export TITANOS_BIENVENUE=1
-    printf '\033[1;35mTitanOs bêta 15\033[0m - noyau Linux %s - BusyBox\n' "$(uname -r)"
+    printf '\033[1;35mTitanOs bêta 17\033[0m - noyau Linux %s - BusyBox\n' "$(uname -r)"
     printf 'Tapez \033[1maide\033[0m pour la liste des commandes.\n\n'
 fi
 cd "$HOME" 2>/dev/null

@@ -1,4 +1,9 @@
-/* TitanOs - écran : DRM/KMS (tampon « dumb ») ou, à défaut, /dev/fb0
+/* TitanOs - écran : DRM/KMS (tampons « dumb ») ou, à défaut, /dev/fb0
+ *
+ * Avec le vrai pilote de la carte graphique, deux images sont gardées en mémoire vidéo :
+ * on dessine dans celle qui n'est pas affichée, puis on demande à la carte de basculer au
+ * prochain rafraîchissement de l'écran (page flip, synchronisé sur 60 Hz). Plus de
+ * déchirure, et les animations suivent exactement le rythme de l'écran.
  *
  * Au démarrage, l'écran est celui préparé par le chargeur (VBE ou GOP), exposé par le
  * pilote simpledrm du noyau. Dès que le vrai pilote de la carte graphique est chargé
@@ -11,12 +16,18 @@
 static struct {
     int fd;
     bool drm, dirty_ok;
-    uint32_t *map;
+    uint32_t *map;              /* image où l'on dessine (celle qui n'est pas affichée en mode double) */
     size_t size;
     int w, h, pitch;            /* pitch en pixels */
     uint32_t fb_id, handle, crtc, conn;
     char driver[32];
-    int card;
+    int card, hz;
+    /* double tampon */
+    bool flip;                  /* bascule synchronisée active */
+    bool pending;               /* une bascule attend le prochain rafraîchissement */
+    int back, misses;
+    uint32_t *maps[2], fbs[2], handles[2];
+    rect_t last;                /* zone changée à l'image précédente */
 } D = { .fd = -1 };
 
 int display_w(void) { return D.w; }
@@ -97,6 +108,35 @@ static bool drm_pick(int fd, uint32_t *conn_out, uint32_t *crtc_out, struct drm_
     return true;
 }
 
+static bool make_buffer(int fd, int w, int h, uint32_t *handle, uint32_t *fb_id, uint32_t **map, size_t *size, int *pitch) {
+    struct drm_mode_create_dumb cd = { 0 };
+    cd.width = (uint32_t)w;
+    cd.height = (uint32_t)h;
+    cd.bpp = 32;
+    if (sys_ioctl(fd, DRM_IOCTL_MODE_CREATE_DUMB, &cd) < 0) return false;
+    struct drm_mode_fb_cmd fb = { 0 };
+    fb.width = (uint32_t)w;
+    fb.height = (uint32_t)h;
+    fb.pitch = cd.pitch;
+    fb.bpp = 32;
+    fb.depth = 24;
+    fb.handle = cd.handle;
+    struct drm_mode_map_dumb md = { 0 };
+    md.handle = cd.handle;
+    void *m = (void *)-1;
+    if (sys_ioctl(fd, DRM_IOCTL_MODE_ADDFB, &fb) == 0 && sys_ioctl(fd, DRM_IOCTL_MODE_MAP_DUMB, &md) == 0)
+        m = sys_mmap(NULL, (size_t)cd.size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (long)md.offset);
+    if ((long)m < 0 && (long)m > -4096) m = (void *)-1;
+    if (m == (void *)-1) return false;
+    memset(m, 0, (size_t)cd.size);
+    *handle = cd.handle;
+    *fb_id = fb.fb_id;
+    *map = m;
+    *size = (size_t)cd.size;
+    *pitch = (int)(cd.pitch / 4);
+    return true;
+}
+
 static bool drm_open(int card) {
     char path[32];
     snprintf(path, sizeof path, "/dev/dri/card%d", card);
@@ -106,49 +146,49 @@ static bool drm_open(int card) {
     struct drm_mode_modeinfo mode;
     uint32_t conn, crtc;
     if (!drm_pick(fd, &conn, &crtc, &mode)) { sys_close(fd); return false; }
-    struct drm_mode_create_dumb cd = { 0 };
-    cd.width = mode.hdisplay;
-    cd.height = mode.vdisplay;
-    cd.bpp = 32;
-    if (sys_ioctl(fd, DRM_IOCTL_MODE_CREATE_DUMB, &cd) < 0) { sys_close(fd); return false; }
-    struct drm_mode_fb_cmd fb = { 0 };
-    fb.width = mode.hdisplay;
-    fb.height = mode.vdisplay;
-    fb.pitch = cd.pitch;
-    fb.bpp = 32;
-    fb.depth = 24;
-    fb.handle = cd.handle;
-    struct drm_mode_map_dumb md = { 0 };
-    md.handle = cd.handle;
-    void *map = (void *)-1;
-    if (sys_ioctl(fd, DRM_IOCTL_MODE_ADDFB, &fb) == 0 && sys_ioctl(fd, DRM_IOCTL_MODE_MAP_DUMB, &md) == 0)
-        map = sys_mmap(NULL, (size_t)cd.size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (long)md.offset);
-    if ((long)map < 0 && (long)map > -4096) map = (void *)-1;
-    if (map == (void *)-1) { sys_close(fd); return false; }
-    memset(map, 0, (size_t)cd.size);
+    uint32_t handle, fb_id, *map;
+    size_t size;
+    int pitch;
+    if (!make_buffer(fd, mode.hdisplay, mode.vdisplay, &handle, &fb_id, &map, &size, &pitch)) { sys_close(fd); return false; }
     struct drm_mode_crtc sc = { 0 };
     sc.crtc_id = crtc;
-    sc.fb_id = fb.fb_id;
+    sc.fb_id = fb_id;
     sc.set_connectors_ptr = (uint64_t)(uintptr_t)&conn;
     sc.count_connectors = 1;
     sc.mode = mode;
     sc.mode_valid = 1;
-    if (sys_ioctl(fd, DRM_IOCTL_MODE_SETCRTC, &sc) < 0) { sys_munmap(map, (size_t)cd.size); sys_close(fd); return false; }
+    if (sys_ioctl(fd, DRM_IOCTL_MODE_SETCRTC, &sc) < 0) { sys_munmap(map, size); sys_close(fd); return false; }
     D.fd = fd;
     D.drm = true;
     D.dirty_ok = true;
     D.map = map;
-    D.size = (size_t)cd.size;
+    D.size = size;
     D.w = mode.hdisplay;
     D.h = mode.vdisplay;
-    D.pitch = (int)(cd.pitch / 4);
-    D.fb_id = fb.fb_id;
-    D.handle = cd.handle;
+    D.pitch = pitch;
+    D.fb_id = fb_id;
+    D.handle = handle;
     D.crtc = crtc;
     D.conn = conn;
     D.card = card;
+    D.hz = mode.vrefresh;
+    D.flip = false;
+    D.pending = false;
+    D.misses = 0;
     drm_driver_name(fd, D.driver, sizeof D.driver);
-    klog("écran : %s, %dx%d", D.driver, D.w, D.h);
+    /* double tampon avec le vrai pilote (simpledrm n'a pas de synchronisation verticale) */
+    if (strcmp(D.driver, "simpledrm")) {
+        int p2;
+        size_t s2;
+        if (make_buffer(fd, D.w, D.h, &D.handles[1], &D.fbs[1], &D.maps[1], &s2, &p2) && p2 == D.pitch) {
+            D.maps[0] = map; D.fbs[0] = fb_id; D.handles[0] = handle;
+            D.back = 1;
+            D.map = D.maps[1];
+            D.flip = true;
+            D.last = R(0, 0, D.w, D.h);
+        }
+    }
+    klog("écran : %s, %dx%d à %d Hz%s", D.driver, D.w, D.h, D.hz, D.flip ? ", double tampon synchronisé" : "");
     return true;
 }
 
@@ -176,11 +216,21 @@ static bool fb_open(void) {
 
 void display_close(void) {
     if (D.fd < 0) return;
-    if (D.map) sys_munmap(D.map, D.size);
-    if (D.drm) {
-        sys_ioctl(D.fd, DRM_IOCTL_MODE_RMFB, &D.fb_id);
-        struct drm_mode_destroy_dumb dd = { D.handle };
-        sys_ioctl(D.fd, DRM_IOCTL_MODE_DESTROY_DUMB, &dd);
+    if (D.flip) {
+        for (int i = 0; i < 2; i++) {
+            sys_munmap(D.maps[i], D.size);
+            sys_ioctl(D.fd, DRM_IOCTL_MODE_RMFB, &D.fbs[i]);
+            struct drm_mode_destroy_dumb dd = { D.handles[i] };
+            sys_ioctl(D.fd, DRM_IOCTL_MODE_DESTROY_DUMB, &dd);
+        }
+        D.flip = false;
+    } else {
+        if (D.map) sys_munmap(D.map, D.size);
+        if (D.drm) {
+            sys_ioctl(D.fd, DRM_IOCTL_MODE_RMFB, &D.fb_id);
+            struct drm_mode_destroy_dumb dd = { D.handle };
+            sys_ioctl(D.fd, DRM_IOCTL_MODE_DESTROY_DUMB, &dd);
+        }
     }
     sys_close(D.fd);
     D.fd = -1;
@@ -223,9 +273,54 @@ bool display_better_available(void) {
 uint64_t display_us;                   /* temps passé à envoyer les images (mesure) */
 static uint64_t now_us(void) { struct timespec ts; sys_clock_gettime(CLOCK_MONOTONIC, &ts); return (uint64_t)ts.tv_sec * 1000000 + (uint64_t)ts.tv_nsec / 1000; }
 
+/* attend que la bascule demandée ait eu lieu (au plus 50 ms) */
+static void wait_flip(void) {
+    if (!D.pending) return;
+    struct pollfd p = { D.fd, POLLIN, 0 };
+    if (sys_poll(&p, 1, 50) > 0) {
+        char ev[256];
+        sys_read(D.fd, ev, sizeof ev);          /* événement « bascule faite » */
+        D.misses = 0;
+    } else if (++D.misses >= 3) {               /* le pilote ne répond pas : on repasse en simple */
+        klog("écran : bascule synchronisée sans réponse, abandonnée");
+        D.flip = false;
+        D.map = D.maps[D.back ^ 1];
+    }
+    D.pending = false;
+}
+
+int display_hz(void) { return D.hz; }
+
 void display_present(const uint32_t *scene, int stride, rect_t r) {
     if (!D.map) return;
     uint64_t t0 = now_us();
+    if (D.flip) {
+        r = rect_isect(r, R(0, 0, D.w, D.h));
+        if (rect_empty(r)) return;
+        wait_flip();
+        if (D.flip) {
+            /* l'image cachée date d'il y a deux images : on y recopie ce qui a changé depuis */
+            rect_t u = rect_union(r, D.last);
+            uint32_t *dst = D.maps[D.back];
+            for (int j = 0; j < u.h; j++)
+                memcpy(dst + (size_t)(u.y + j) * D.pitch + u.x, scene + (size_t)(u.y + j) * stride + u.x, (size_t)u.w * 4);
+            struct drm_mode_crtc_page_flip pf = { 0 };
+            pf.crtc_id = D.crtc;
+            pf.fb_id = D.fbs[D.back];
+            pf.flags = DRM_MODE_PAGE_FLIP_EVENT;
+            long rr = sys_ioctl(D.fd, DRM_IOCTL_MODE_PAGE_FLIP, &pf);
+            if (rr == 0) {
+                D.pending = true;
+                D.back ^= 1;
+                D.last = r;
+                display_us += now_us() - t0;
+                return;
+            }
+            klog("écran : bascule refusée (%ld), affichage simple", rr);
+            D.flip = false;
+            D.map = D.maps[D.back ^ 1];          /* l'image affichée */
+        }
+    }
     r = rect_isect(r, R(0, 0, D.w, D.h));
     if (rect_empty(r)) return;
     for (int j = 0; j < r.h; j++)

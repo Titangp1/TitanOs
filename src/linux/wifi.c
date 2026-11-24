@@ -16,9 +16,14 @@ static uint64_t next_try;
 /* ---- démarrage ---- */
 static void rfkill_cb(const char *name, int type, void *ctx) {
     (void)type; (void)ctx;
-    char p[96];
+    char p[96], v[8];
     snprintf(p, sizeof p, "/sys/class/rfkill/%s/soft", name);
-    write_file(p, "0");                         /* débloque la radio (bouton logiciel) */
+    /* seulement si la radio est bloquée : sur le VAIO, chaque écriture (même identique) est
+     * transmise au contrôleur par le pilote sony-laptop, qui relance alors la carte Wi-Fi */
+    if (read_file(p, v, sizeof v) > 0 && v[0] == '1') {
+        write_file(p, "0");
+        klog("Wi-Fi : radio %s débloquée", name);
+    }
 }
 
 static void gov_cb(const char *name, int type, void *ctx) {
@@ -27,6 +32,28 @@ static void gov_cb(const char *name, int type, void *ctx) {
     char p[96];
     snprintf(p, sizeof p, "/sys/devices/system/cpu/%s/cpufreq/scaling_governor", name);
     write_file(p, (const char *)ctx);
+}
+
+/* connexion Wi-Fi établie : demande une adresse tout de suite, sans attendre le prochain
+ * essai de udhcpc (qui peut être 5 à 20 s plus tard) */
+static void dhcp_now(void) {
+    char p[48], v[16];
+    snprintf(p, sizeof p, "/run/udhcpc.%s.pid", iface);
+    int pid = read_file(p, v, sizeof v) > 0 ? atoi(v) : 0;
+    char proc[32];
+    snprintf(proc, sizeof proc, "/proc/%d", pid);
+    if (pid > 1 && path_exists(proc)) { sys_kill(pid, 10 /* SIGUSR1 : renouveler */); return; }
+    int c = sys_fork();
+    if (c == 0) {
+        sys_setsid();
+        int nul = sys_open("/dev/null", O_RDWR, 0);
+        if (nul >= 0) { sys_dup2(nul, 0); sys_dup2(nul, 1); sys_dup2(nul, 2); }
+        char *argv[] = { "/bin/busybox", "udhcpc", "-i", iface, "-b", "-t", "4", "-T", "3", "-A", "5", "-p", p,
+                         "-s", "/etc/udhcpc.script", NULL };
+        sys_execve(argv[0], argv, g_envp);
+        sys_exit(127);
+    }
+    klog("Wi-Fi : connecté, demande d'adresse (DHCP)");
 }
 
 /* radio coupée par un interrupteur matériel (« hard ») ? */
@@ -214,7 +241,16 @@ static int w_status(char *ssid, int n, int *signal) {
     return WIFI_OFF;
 }
 
-static void w_scan(void) { ok("SCAN"); }
+/* une recherche pendant l'authentification (4-way handshake) fait échouer la connexion */
+static void w_scan(void) {
+    char st[1024];
+    if (request("STATUS", st, sizeof st) > 0 &&
+        (strstr(st, "wpa_state=ASSOCIATING") || strstr(st, "wpa_state=ASSOCIATED") ||
+         strstr(st, "wpa_state=AUTHENTICATING") || strstr(st, "wpa_state=4WAY_HANDSHAKE") ||
+         strstr(st, "wpa_state=GROUP_HANDSHAKE")))
+        return;
+    ok("SCAN");
+}
 
 static int w_list(wifi_net_t *list, int max) {
     static char buf[16384];
@@ -292,6 +328,8 @@ static bool w_connect(const char *ssid, const char *psk) {
         snprintf(cmd, sizeof cmd, "SET_NETWORK %d key_mgmt NONE", id);
         ok(cmd);
     }
+    snprintf(cmd, sizeof cmd, "SET_NETWORK %d scan_ssid 1", id);           /* aussi les réseaux masqués */
+    ok(cmd);
     snprintf(cmd, sizeof cmd, "SELECT_NETWORK %d", id);
     bool r = ok(cmd);
     ok("SAVE_CONFIG");
@@ -377,6 +415,7 @@ static void helper_main(int out, int in) {
             }
         }
         static int last_state = -9;
+        if (s.wstate == WIFI_CONNECTED && last_state != WIFI_CONNECTED) dhcp_now();
         if (s.wstate != last_state) {
             static const char *const nm[] = { "aucune carte", "non connecté", "connexion", "connecté", "interrupteur sur OFF", "mot de passe refusé" };
             klog("Wi-Fi : %s%s%s (%d réseaux visibles)", nm[s.wstate + 1], s.wssid[0] ? " - " : "", s.wssid, s.nnets);
