@@ -23,7 +23,7 @@ CACHE = os.path.join(OUT, "cache")
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 
 CORE = ["lib.c", "gfx.c", "glass.c", "icons.c", "settings.c", "sound.c", "wm.c", "ui.c", "apps.c", "term.c", "files.c",
-        "notes.c", "prefs.c", "sysapp.c", "netapp.c", "updapp.c", "png.c", "imgview.c", "browser.c"]
+        "notes.c", "prefs.c", "sysapp.c", "netapp.c", "updapp.c", "png.c", "jpeg.c", "imgview.c", "browser.c"]
 LINUX = ["main.c", "sys.c", "modules.c", "display.c", "input.c", "plat.c", "audio.c", "wifi.c", "pcinames.c", "update.c", "volumes.c", "xbridge.c"]
 
 # polices générées : (nom C, police Inter, taille en pixels, caractères ou None = tous)

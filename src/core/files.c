@@ -73,16 +73,90 @@ static void files_up(window_t *w, files_t *f) {
     files_load(w, f);
 }
 
-static bool is_text(const dirent_t *e) {
-    static const char *ext[] = { ".txt", ".md", ".cfg", ".conf", ".sh", ".log", ".c", ".h", ".py", ".json", ".ini", ".csv", ".html" };
-    for (int i = 0; i < countof(ext); i++) if (str_ends(e->name, ext[i])) return true;
-    return !strchr(e->name, '.') && e->size < 512 * 1024;
+/* ---- types de fichiers et application qui les ouvre ---- */
+static bool ext_in(const char *n, const char *const *ext) {
+    for (int i = 0; ext[i]; i++) if (str_ends(n, ext[i])) return true;
+    return false;
+}
+static const char *const TEXT_EXT[] = { ".txt", ".md", ".cfg", ".conf", ".sh", ".log", ".c", ".h", ".cpp", ".hpp", ".py", ".js",
+    ".ts", ".css", ".json", ".ini", ".csv", ".xml", ".yml", ".yaml", ".toml", ".srt", ".nfo", ".tex", ".bat", ".ps1", ".rs",
+    ".go", ".java", ".lua", ".sql", ".diff", ".patch", NULL };
+static const char *const IMAGE_EXT[] = { ".png", ".jpg", ".jpeg", ".jpe", ".bmp", ".gif", ".ppm", ".pgm", NULL };
+/* ouverts dans Chromium : documents, médias, pages web, images modernes */
+static const char *const WEB_EXT[] = { ".pdf", ".html", ".htm", ".svg", ".webp", ".avif", ".mp4", ".m4v", ".webm", ".mkv", ".mov",
+    ".ogv", ".mp3", ".m4a", ".ogg", ".oga", ".opus", ".wav", ".flac", ".aac", NULL };
+static const char *const ARCHIVE_EXT[] = { ".zip", ".tar", ".tar.gz", ".tgz", ".tar.xz", ".txz", ".tar.bz2", ".tbz2", ".gz", NULL };
+
+/* fichier sans extension connue : texte s'il ne contient pas d'octet nul au début */
+static bool looks_like_text(const char *path) {
+    char *d;
+    size_t n;
+    if (plat_readfile(path, &d, &n) != 0) return false;
+    bool t = n < 4 * 1024 * 1024;
+    for (size_t i = 0; t && i < n && i < 4096; i++) if (d[i] == 0) t = false;
+    free(d);
+    return t;
 }
 
 static int file_icon(const dirent_t *e) {
     if (e->dir) return ICON_FOLDER;
-    if (str_ends(e->name, ".png") || str_ends(e->name, ".jpg") || str_ends(e->name, ".bmp") || str_ends(e->name, ".ppm")) return ICON_IMAGE;
+    if (ext_in(e->name, IMAGE_EXT) || str_ends(e->name, ".webp") || str_ends(e->name, ".svg")) return ICON_IMAGE;
     return ICON_FILE;
+}
+
+static void file_url(char *out, size_t n, const char *path) {
+    size_t k = (size_t)snprintf(out, n, "file://");
+    for (const unsigned char *p = (const unsigned char *)path; *p && k + 4 < n; p++) {
+        if (*p <= ' ' || *p == '#' || *p == '%' || *p == '?' || *p >= 0x80) k += (size_t)snprintf(out + k, n - k, "%%%02X", *p);
+        else out[k++] = (char)*p;
+    }
+    out[k] = 0;
+}
+
+static void extract(const char *path);
+
+void open_path(const char *path) {
+    bool dir = false;
+    if (!plat_exists(path, &dir)) { wm_toast("Ce fichier n'existe plus."); return; }
+    if (dir) { app_files_open(path); return; }
+    if (ext_in(path, TEXT_EXT)) { app_notes_open(path); return; }
+    if (ext_in(path, IMAGE_EXT)) { app_image_open(path); return; }
+    if (ext_in(path, ARCHIVE_EXT)) { extract(path); return; }
+    if (ext_in(path, WEB_EXT)) {
+        if (plat_browser_state(NULL, 0, NULL) != BR_READY) {
+            dlg_message("Fichiers", "Ce fichier s'ouvre avec Chromium, qui n'est pas encore installé : il s'installe dès que TitanOs a Internet.");
+            return;
+        }
+        char url[700];
+        file_url(url, sizeof url, path);
+        app_browser_open();
+        plat_browser_open_url(url);
+        return;
+    }
+    if (looks_like_text(path)) { app_notes_open(path); return; }
+    dlg_message("Fichiers", "TitanOs ne sait pas ouvrir ce type de fichier. Les documents PDF, vidéos, musiques et pages web s'ouvrent dans Chromium.");
+}
+
+/* archives : extraites dans un dossier du même nom, à côté */
+static void extract(const char *path) {
+    char dir[512];
+    strlcpy(dir, path, sizeof dir);
+    static const char *const strip[] = { ".tar.gz", ".tar.xz", ".tar.bz2", ".tgz", ".txz", ".tbz2", ".zip", ".tar", ".gz", NULL };
+    for (int i = 0; strip[i]; i++)
+        if (str_ends(dir, strip[i])) { dir[strlen(dir) - strlen(strip[i])] = 0; break; }
+    plat_mkdir(dir);
+    static char cmd[1200];
+    if (str_ends(path, ".zip")) snprintf(cmd, sizeof cmd, "cd \"%s\" && /bin/busybox unzip -o -q \"%s\"", dir, path);
+    else if (str_ends(path, ".gz") && !str_ends(path, ".tar.gz")) snprintf(cmd, sizeof cmd, "/bin/busybox gunzip -c \"%s\" > \"%s\"/\"$(basename \"%s\" .gz)\"", path, dir, path);
+    else snprintf(cmd, sizeof cmd, "cd \"%s\" && /bin/busybox tar -xf \"%s\"", dir, path);
+    static const char *argv[] = { "/bin/busybox", "sh", "-c", NULL, NULL };
+    argv[3] = cmd;
+    if (plat_spawn(argv) >= 0) {
+        const char *b = strrchr(dir, '/');
+        char msg[200];
+        snprintf(msg, sizeof msg, "Extraction dans le dossier « %s »…", b ? b + 1 : dir);
+        wm_toast(msg);
+    } else wm_toast("Extraction impossible.");
 }
 
 static void files_open_sel(window_t *w, files_t *f) {
@@ -91,9 +165,7 @@ static void files_open_sel(window_t *w, files_t *f) {
     char p[512];
     path_join(p, sizeof p, f->path, e->name);
     if (e->dir) files_go(w, f, p);
-    else if (is_text(e)) app_notes_open(p);
-    else if (str_ends(e->name, ".png") || str_ends(e->name, ".PNG") || str_ends(e->name, ".bmp") || str_ends(e->name, ".BMP")) app_image_open(p);
-    else dlg_message("Fichiers", "TitanOs ne sait pas encore ouvrir ce type de fichier.");
+    else open_path(p);
 }
 
 /* ---- actions avec dialogue ---- */
@@ -170,22 +242,38 @@ static void ask_delete(window_t *w, files_t *f) {
     dlg_confirm("Supprimer", msg, "Supprimer", do_delete, f);
 }
 
+/* menu contextuel : ouvrir d'abord, puis modifier, puis créer */
+enum { C_OPEN, C_NOTES, C_DESK, C_RENAME, C_DUP, C_DEL, C_MKDIR, C_MKFILE, C_SEP = -1 };
+static const char *const ctx_file[] = { "Ouvrir", "Ouvrir avec le Bloc-notes", "Ajouter au bureau", "-", "Renommer", "Dupliquer",
+                                        "Supprimer", "-", "Nouveau dossier", "Nouveau fichier" };
+static const signed char act_file[] = { C_OPEN, C_NOTES, C_DESK, C_SEP, C_RENAME, C_DUP, C_DEL, C_SEP, C_MKDIR, C_MKFILE };
+static const char *const ctx_dir[] = { "Ouvrir", "Ajouter au bureau", "-", "Renommer", "Dupliquer", "Supprimer", "-",
+                                       "Nouveau dossier", "Nouveau fichier" };
+static const signed char act_dir[] = { C_OPEN, C_DESK, C_SEP, C_RENAME, C_DUP, C_DEL, C_SEP, C_MKDIR, C_MKFILE };
+static const char *const ctx_empty[] = { "Nouveau dossier", "Nouveau fichier" };
+static const signed char act_empty[] = { C_MKDIR, C_MKFILE };
+static const signed char *ctx_act;
+static int ctx_nact;
+
 static void ctx_cb(int i, void *ctx) {
     window_t *w = ctx;
-    if (!w->used) return;
+    if (!w->used || i < 0 || i >= ctx_nact) return;
     files_t *f = w->data;
     cur_win = w;
-    switch (i) {
-    case 0: files_open_sel(w, f); break;
-    case 1: ask_rename(w, f); break;
-    case 2: do_duplicate(w, f); break;
-    case 3: ask_delete(w, f); break;
-    case 5: dlg_input("Nouveau dossier", "Nom du dossier", "Nouveau dossier", do_mkdir, f); break;
-    case 6: dlg_input("Nouveau fichier", "Nom du fichier", "Nouveau texte.txt", do_mkfile, f); break;
+    bool has = f->sel >= 0 && f->sel < f->n;
+    char p[512];
+    if (has) path_join(p, sizeof p, f->path, f->ent[f->sel].name);
+    switch (ctx_act[i]) {
+    case C_OPEN: files_open_sel(w, f); break;
+    case C_NOTES: if (has && !f->ent[f->sel].dir) app_notes_open(p); break;
+    case C_DESK: if (has) wm_desk_add_path(p); break;
+    case C_RENAME: ask_rename(w, f); break;
+    case C_DUP: do_duplicate(w, f); break;
+    case C_DEL: ask_delete(w, f); break;
+    case C_MKDIR: dlg_input("Nouveau dossier", "Nom du dossier", "Nouveau dossier", do_mkdir, f); break;
+    case C_MKFILE: dlg_input("Nouveau fichier", "Nom du fichier", "Nouveau texte.txt", do_mkfile, f); break;
     }
 }
-
-static void ctx_cb_empty(int i, void *ctx) { ctx_cb(i + 5, ctx); }
 
 /* ---- dessin ---- */
 static rect_t bar_btn(canvas_t *c, int i) {     /* 0 parent, 1 nouveau dossier, 2 nouveau fichier */
@@ -320,9 +408,11 @@ static void files_event(window_t *w, const event_t *e) {
             if (e->button == BTN_LEFT && e->dx && row_at >= 0) files_open_sel(w, f);   /* double-clic */
             if (e->button == BTN_RIGHT) {
                 rect_t cl = wm_client(w);
-                static const char *with_sel[] = { "Ouvrir", "Renommer", "Dupliquer", "Supprimer", "-", "Nouveau dossier", "Nouveau fichier" };
-                if (row_at >= 0) wm_menu(cl.x + e->x, cl.y + e->y, with_sel, countof(with_sel), ctx_cb, w);
-                else wm_menu(cl.x + e->x, cl.y + e->y, with_sel + 5, 2, ctx_cb_empty, w);
+                const char *const *items = ctx_empty;
+                if (row_at < 0) { ctx_act = act_empty; ctx_nact = countof(act_empty); }
+                else if (f->ent[row_at].dir) { items = ctx_dir; ctx_act = act_dir; ctx_nact = countof(act_dir); }
+                else { items = ctx_file; ctx_act = act_file; ctx_nact = countof(act_file); }
+                wm_menu(cl.x + e->x, cl.y + e->y, items, ctx_nact, ctx_cb, w);
             }
         }
         return;

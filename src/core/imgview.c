@@ -1,4 +1,4 @@
-/* TitanOs - Visionneuse d'images (PNG et BMP)
+/* TitanOs - Visionneuse d'images (PNG, JPEG, GIF, BMP, PPM)
  *
  * L'image est ajustée à la fenêtre ; la version réduite est calculée une fois par taille
  * de fenêtre (moyenne des pixels couverts, pour une réduction nette). Flèches gauche et
@@ -7,6 +7,9 @@
 
 bool png_decode(const uint8_t *f, size_t n, canvas_t *out);
 bool bmp_decode(const uint8_t *f, size_t n, canvas_t *out);
+bool jpeg_decode(const uint8_t *f, size_t n, canvas_t *out);
+bool gif_decode(const uint8_t *f, size_t n, canvas_t *out);
+bool ppm_decode(const uint8_t *f, size_t n, canvas_t *out);
 
 typedef struct {
     char path[512];
@@ -15,7 +18,11 @@ typedef struct {
     bool bad;
 } view_t;
 
-static bool is_image(const char *n) { return str_ends(n, ".png") || str_ends(n, ".PNG") || str_ends(n, ".bmp") || str_ends(n, ".BMP"); }
+static bool is_image(const char *n) {
+    static const char *const ext[] = { ".png", ".jpg", ".jpeg", ".jpe", ".bmp", ".gif", ".ppm", ".pgm" };
+    for (int i = 0; i < countof(ext); i++) if (str_ends(n, ext[i])) return true;
+    return false;
+}
 
 static void load(window_t *w, view_t *v, const char *path) {
     canvas_free(&v->img);
@@ -26,7 +33,9 @@ static void load(window_t *w, view_t *v, const char *path) {
     size_t n;
     v->bad = true;
     if (plat_readfile(path, &data, &n) == 0) {
-        v->bad = !(png_decode((const uint8_t *)data, n, &v->img) || bmp_decode((const uint8_t *)data, n, &v->img));
+        const uint8_t *u = (const uint8_t *)data;
+        v->bad = !(png_decode(u, n, &v->img) || jpeg_decode(u, n, &v->img) || gif_decode(u, n, &v->img) ||
+                   bmp_decode(u, n, &v->img) || ppm_decode(u, n, &v->img));
         free(data);
     }
     const char *base = strrchr(path, '/');
@@ -64,7 +73,7 @@ static void view_draw(window_t *w, canvas_t *c) {
     view_t *v = w->data;
     gfx_fill(c, R(0, 0, c->w, c->h), 0x40000000);
     if (v->bad) {
-        text_center(c, &font_body, R(0, c->h / 2 - 12, c->w, 24), "Image illisible : formats pris en charge, PNG et BMP.", C_MUTED);
+        text_center(c, &font_body, R(0, c->h / 2 - 12, c->w, 24), "Image illisible ici (fichier abîmé ou format WebP, AVIF…) : ouvrez-la dans Chromium.", C_MUTED);
         return;
     }
     int bw = c->w - 32, bh = c->h - 56;

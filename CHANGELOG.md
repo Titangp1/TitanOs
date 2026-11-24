@@ -2,6 +2,23 @@
 
 Toutes les versions sont dans les [versions publiées](../../releases). Depuis la bêta 6, TitanOs se met à jour tout seul.
 
+## Bêta 23
+
+**Plus de types de fichiers**
+- **Photos JPEG** : séquentielles (appareils photo, téléphones) et progressives (images du web), en couleurs ou en niveaux de gris. Une photo de 12 mégapixels s'ouvre en moins d'une seconde. Les photos prises en portrait sont remises droites (orientation EXIF).
+- **GIF** (première image, transparence, entrelacement) et **PPM/PGM**, en plus de PNG et BMP.
+- **Double-clic dans Fichiers** : chaque fichier s'ouvre avec la bonne application. Textes et code (txt, md, py, c, json, csv, log…) : Bloc-notes. Images : visionneuse. **PDF, vidéos (mp4, webm, mkv…), musique (mp3, ogg, flac, wav…), pages web, SVG et WebP** : Chromium. Fichier sans extension : Bloc-notes s'il contient du texte.
+- **Archives** zip, tar, tar.gz, tar.xz, tar.bz2 et gz : un double-clic les extrait dans un dossier du même nom, à côté.
+- Nouveau clic droit dans Fichiers : « Ouvrir avec le Bloc-notes ». Le menu est regroupé : ouvrir, modifier, créer.
+- Le son est libéré dès que l'interface ne joue plus rien, pour que Chromium puisse s'en servir (vidéos, musique).
+
+**Bureau en 1920×1080**
+- La grille des icônes occupe tout l'écran. Les cases sont réparties sur toute la largeur : une icône posée tout à droite est collée au bord, comme à gauche.
+- **Raccourcis** : clic droit sur le bureau → « Ajouter une application au bureau… ». Clic droit sur une application du menu Démarrer → « Ajouter au bureau ». Clic droit sur un fichier ou un dossier dans Fichiers → « Ajouter au bureau ».
+- **Retirer un raccourci** : clic droit sur l'icône → « Retirer du bureau ». Seul le raccourci disparaît : le fichier ou l'application reste.
+- Les fenêtres redimensionnables (Fichiers, Bloc-notes, Terminal, Image, Réseau, Système) s'ouvrent 20 % plus grandes sur un écran 1080p.
+- Correction : quand un menu en remplaçait un autre, un morceau de l'ancien restait affiché.
+
 ## Bêta 22
 
 - **Menu Démarrer** : avec Chromium, la 3e ligne d'applications passait sous le nom de l'utilisateur. Le menu affiche maintenant 6 applications par ligne, et sa hauteur suit leur nombre.

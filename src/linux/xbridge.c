@@ -116,6 +116,7 @@ static const uint8_t *fb;
 static size_t fb_size;
 static int fb_off, fb_pitch;
 static bool started;
+static char start_url[700];                 /* adresse à ouvrir au lancement de Chromium */
 
 static int spawn_env(char *const *argv, char *const *env) {
     int pid = sys_fork();
@@ -287,8 +288,9 @@ bool plat_browser_frame(uint32_t *dst, int stride, int w, int h) {
         snprintf(size, sizeof size, "--window-size=%d,%d", win_w_, win_h_);
         char *argv[] = { (char *)cp, "--no-sandbox", "--test-type", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
                          "--password-store=basic", "--disable-dev-shm-usage", "--window-position=0,0", size, "--start-maximized",
-                         "--lang=fr", "--user-data-dir=/root/.config/chromium", "https://www.google.fr", NULL };
+                         "--lang=fr", "--user-data-dir=/root/.config/chromium", start_url[0] ? start_url : "https://www.google.fr", NULL };
         chrome_pid = spawn_env(argv, xenv);
+        start_url[0] = 0;                       /* adresse transmise : pas rouverte au prochain lancement */
         klog("Chromium : lancé (pid %d)", chrome_pid);
     }
     map_fb();
@@ -320,6 +322,15 @@ void plat_browser_input(int type, int detail, int x, int y) {
     x = CLAMP(x, 0, scr_w_ - 1);
     y = CLAMP(y, 0, scr_h_ - 1);
     x_fake(type, detail, x, y);
+}
+
+/* Chromium déjà lancé : un second lancement avec le même profil transmet l'adresse à la
+ * fenêtre ouverte (nouvel onglet). Sinon elle sera ouverte au démarrage. */
+void plat_browser_open_url(const char *url) {
+    if (chrome_pid > 0 && plat_browser_running()) {
+        char *argv[] = { (char *)chromium_path(), "--no-sandbox", "--user-data-dir=/root/.config/chromium", (char *)url, NULL };
+        spawn_env(argv, xenv);
+    } else strlcpy(start_url, url, sizeof start_url);
 }
 
 void plat_browser_stop(void) {

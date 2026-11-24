@@ -162,7 +162,8 @@ static glass_t style_for(int kind) {
 
 /* ---------------- géométrie du bureau ---------------- */
 static const int pinned[] = { ICON_FILES, ICON_BROWSER, ICON_TERMINAL, ICON_NOTES, ICON_CALC, ICON_SETTINGS, ICON_SYSTEM };
-static const int desk_icons[] = { ICON_FILES, ICON_BROWSER, ICON_TERMINAL, ICON_NOTES, ICON_SETTINGS, ICON_SYSTEM, ICON_ABOUT };
+/* raccourcis du bureau : g_set.desk (applications, dossiers, fichiers) */
+#define NDESK (g_set.ndesk)
 
 /* glisser une icône du bureau */
 static int desk_drag = -1;                 /* icône tenue (bouton enfoncé) */
@@ -172,24 +173,23 @@ static int desk_drag_dx, desk_drag_dy, desk_drag_x0, desk_drag_y0;
 static int desk_rows(void);
 static int desk_cols(void);
 static rect_t ghost_last, target_last;     /* zones à redessiner pendant le glissement */
+static bool cell_taken(int c, int r, int except) {
+    for (int j = 0; j < NDESK; j++) if (j != except && g_set.desk[j].col == c && g_set.desk[j].row == r) return true;
+    return false;
+}
 static void desk_cell(int i, int *col, int *row) {
-    int ic = desk_icons[i], rows = desk_rows(), cols = desk_cols();
-    if (g_set.desk_col[ic] >= 0 && g_set.desk_col[ic] < cols && g_set.desk_row[ic] < rows) {
-        *col = g_set.desk_col[ic];
-        *row = g_set.desk_row[ic];
-        return;
-    }
+    int rows = desk_rows(), cols = desk_cols();
+    const desk_item_t *d = &g_set.desk[i];
+    if (d->col >= 0 && d->col < cols && d->row >= 0 && d->row < rows) { *col = d->col; *row = d->row; return; }
     /* place par défaut : la n-ième case libre, colonne par colonne */
     int k = 0;
-    for (int j = 0; j < i; j++) if (g_set.desk_col[desk_icons[j]] < 0) k++;
+    for (int j = 0; j < i; j++) {
+        const desk_item_t *o = &g_set.desk[j];
+        if (!(o->col >= 0 && o->col < cols && o->row >= 0 && o->row < rows)) k++;
+    }
     for (int cell = 0; cell < rows * cols; cell++) {
         int c = cell / rows, r = cell % rows;
-        bool taken = false;
-        for (int j = 0; j < countof(desk_icons); j++) {
-            int o = desk_icons[j];
-            if (g_set.desk_col[o] == c && g_set.desk_row[o] == r) taken = true;
-        }
-        if (taken) continue;
+        if (cell_taken(c, r, -1)) continue;
         if (k-- == 0) { *col = c; *row = r; return; }
     }
     *col = 0;
@@ -266,12 +266,19 @@ static rect_t cal_rect(void) { rect_t t = tray_rect(); return R(scr_w - 12 - 320
 static rect_t osd_rect(void) { return R((scr_w - 300) / 2, scr_h - DOCK_H - 12 - 76, 300, 56); }
 /* icônes du bureau : grille de cases de 100 x 104. Une icône déplacée garde sa case ;
  * les autres se rangent en colonnes dans les cases restées libres. */
-#define CELL_W 100
-#define CELL_H 104
-static int desk_rows(void) { return MAX(1, (scr_h - DOCK_H - 60) / CELL_H); }
-static int desk_cols(void) { return MAX(1, (scr_w - 40) / CELL_W); }
+/* la grille couvre tout l'écran au-dessus du dock : autant de cases que possible (100 x 104
+ * au moins), l'espace restant réparti entre elles, la même marge à gauche et à droite */
+#define DESK_M 12
+static int desk_area_w(void) { return scr_w - 2 * DESK_M; }
+static int desk_area_h(void) { return scr_h - DOCK_H - 24 - 2 * DESK_M; }
+static int desk_cols(void) { return MAX(1, desk_area_w() / 100); }
+static int desk_rows(void) { return MAX(1, desk_area_h() / 104); }
+static float cell_w(void) { return (float)desk_area_w() / desk_cols(); }
+static float cell_h(void) { return (float)desk_area_h() / desk_rows(); }
 static void desk_cell(int i, int *col, int *row);
-static rect_t cell_rect(int col, int row) { return R(20 + col * CELL_W, 20 + row * CELL_H, 92, 96); }
+static rect_t cell_rect(int col, int row) {
+    return R(DESK_M + (int)(col * cell_w() + (cell_w() - 92) / 2), DESK_M + (int)(row * cell_h() + (cell_h() - 96) / 2), 92, 96);
+}
 static rect_t desk_icon_rect(int i) {
     int c, r;
     desk_cell(i, &c, &r);
@@ -375,6 +382,11 @@ window_t *wm_open(const char *title, int icon, int w, int h, unsigned flags) {
     win->minw = 260;
     win->minh = 160;
     strlcpy(win->title, title, sizeof win->title);
+    if ((flags & WF_RESIZABLE) && scr_h > 960) {          /* grand écran (1920 x 1080) : fenêtres à l'échelle */
+        int k = MIN(130, scr_h * 100 / 900);
+        w = w * k / 100;
+        h = h * k / 100;
+    }
     h += TITLE_H;
     w = MIN(w, scr_w - 40);
     h = MIN(h, scr_h - DOCK_H - 40);
@@ -572,7 +584,7 @@ void wm_toast(const char *msg) {
 }
 
 void wm_menu(int x, int y, const char *const *items, int n, void (*cb)(int, void *), void *ctx) {
-    if (pop_open) damage(rect_grow(pop_rect(), 40), 102);
+    if (pop_n) damage(rect_grow(pop_rect(), 40), 102);         /* ancien menu (même en train de disparaître) effacé */
     pop_n = MIN(n, countof(pop_items));
     for (int i = 0; i < pop_n; i++) pop_items[i] = items[i];
     pop_cb = cb;
@@ -777,17 +789,44 @@ static void draw_wallpaper(void) {
 }
 
 static void desk_target(int *col, int *row) {
-    *col = CLAMP((mx - desk_drag_dx + 46 - 20) / CELL_W, 0, desk_cols() - 1);
-    *row = CLAMP((my - desk_drag_dy + 48 - 20) / CELL_H, 0, desk_rows() - 1);
+    *col = CLAMP((int)((mx - desk_drag_dx + 46 - DESK_M) / cell_w()), 0, desk_cols() - 1);
+    *row = CLAMP((int)((my - desk_drag_dy + 48 - DESK_M) / cell_h()), 0, desk_rows() - 1);
+}
+
+static bool is_ext(const char *n, const char *const *ext) {
+    for (int i = 0; ext[i]; i++) if (str_ends(n, ext[i])) return true;
+    return false;
+}
+static const char *const IMG_EXT[] = { ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".ppm", ".webp", ".svg", NULL };
+
+static int desk_icon_id(int i) {
+    const desk_item_t *d = &g_set.desk[i];
+    if (d->app >= 0) return d->app;
+    bool dir = false;
+    if (plat_exists(d->path, &dir) && dir) return ICON_FOLDER;
+    return is_ext(d->path, IMG_EXT) ? ICON_IMAGE : ICON_FILE;
+}
+static const char *desk_label(int i) {
+    const desk_item_t *d = &g_set.desk[i];
+    if (d->app >= 0) return app_name(d->app);
+    const char *b = strrchr(d->path, '/');
+    return b && b[1] ? b + 1 : d->path;
+}
+static void desk_open(int i) {
+    const desk_item_t *d = &g_set.desk[i];
+    if (d->app >= 0) app_open(d->app);
+    else if (!plat_exists(d->path, NULL)) wm_toast("Ce fichier n'existe plus : retirez le raccourci (clic droit).");
+    else open_path(d->path);
 }
 
 static void draw_desk_icon(rect_t r, int i, int alpha) {
     uint32_t a = (uint32_t)alpha << 24;
-    draw_icon(T, desk_icons[i], r.x + (r.w - 56) / 2, r.y + 8, 56);
-    const char *n = app_name(desk_icons[i]);
-    int x = r.x + (r.w - text_width(&font_body, n)) / 2;
-    text_draw(T, &font_body, x, r.y + 71, n, (uint32_t)(alpha * 0x99 / 255) << 24);
-    text_draw(T, &font_body, x, r.y + 70, n, a | (C_TEXT & 0xFFFFFF));
+    draw_icon(T, desk_icon_id(i), r.x + (r.w - 56) / 2, r.y + 8, 56);
+    const char *n = desk_label(i);
+    int tw = MIN(text_width(&font_body, n), r.w + 8);
+    int x = r.x + (r.w - tw) / 2;
+    text_fit(T, &font_body, x, r.y + 71, tw, n, (uint32_t)(alpha * 0x99 / 255) << 24);
+    text_fit(T, &font_body, x, r.y + 70, tw, n, a | (C_TEXT & 0xFFFFFF));
 }
 
 static void draw_desktop(void) {
@@ -799,7 +838,7 @@ static void draw_desktop(void) {
         gfx_rrect(T, t.x, t.y, t.w, t.h, 14, 0x22FFFFFF);
         gfx_rrect_stroke(T, t.x, t.y, t.w, t.h, 14, 1.5f, (accent() & 0xFFFFFF) | 0xC0000000);
     }
-    for (int i = 0; i < countof(desk_icons); i++) {
+    for (int i = 0; i < NDESK; i++) {
         rect_t r = desk_icon_rect(i);
         if (desk_dragging && i == desk_drag) continue;
         if (!rect_hits(r, T->clip)) continue;
@@ -1516,23 +1555,98 @@ static void update_hover(void) {
     set_hover_win(capture ? capture : (mode == MODE_DESK && !menu_open && !pop_open) ? top : NULL, mx, my);
 }
 
+/* ---- raccourcis : ajouter, retirer ---- */
+static void desk_changed(void) { settings_save(); damage(R(0, 0, scr_w, scr_h - DOCK_H - 20), 0); }
+
+bool wm_desk_add_app(int app) {
+    for (int i = 0; i < NDESK; i++) if (g_set.desk[i].app == app) { wm_toast("Déjà sur le bureau."); return false; }
+    if (NDESK >= DESK_MAX) { wm_toast("Le bureau est plein."); return false; }
+    desk_item_t *d = &g_set.desk[g_set.ndesk++];
+    memset(d, 0, sizeof *d);
+    d->app = (signed char)app;
+    d->col = d->row = -1;
+    desk_changed();
+    return true;
+}
+
+bool wm_desk_add_path(const char *path) {
+    for (int i = 0; i < NDESK; i++) if (g_set.desk[i].app < 0 && !strcmp(g_set.desk[i].path, path)) { wm_toast("Déjà sur le bureau."); return false; }
+    if (NDESK >= DESK_MAX || strlen(path) >= sizeof g_set.desk[0].path) { wm_toast("Impossible d'ajouter ce raccourci."); return false; }
+    desk_item_t *d = &g_set.desk[g_set.ndesk++];
+    memset(d, 0, sizeof *d);
+    d->app = -1;
+    d->col = d->row = -1;
+    strlcpy(d->path, path, sizeof d->path);
+    desk_changed();
+    wm_toast("Raccourci ajouté au bureau.");
+    return true;
+}
+
+static void desk_remove(int i) {
+    if (i < 0 || i >= NDESK) return;
+    /* les autres gardent leur place : leur case actuelle devient leur case choisie */
+    for (int j = 0; j < NDESK; j++) {
+        if (j == i || g_set.desk[j].col >= 0) continue;
+        int c, r;
+        desk_cell(j, &c, &r);
+        g_set.desk[j].col = (signed char)c;
+        g_set.desk[j].row = (signed char)r;
+    }
+    memmove(&g_set.desk[i], &g_set.desk[i + 1], sizeof(desk_item_t) * (size_t)(NDESK - i - 1));
+    g_set.ndesk--;
+    desk_sel = -1;
+    desk_changed();
+}
+
+static int menu_icon_idx;                  /* icône visée par le menu (clic droit) */
+static void icon_menu_cb(int i, void *ctx) {
+    (void)ctx;
+    if (i == 0) desk_open(menu_icon_idx);
+    else if (i == 2) desk_remove(menu_icon_idx);
+}
+
+static int add_choices[APP_COUNT], add_n;
+static void add_menu_cb(int i, void *ctx) {
+    (void)ctx;
+    if (i >= 0 && i < add_n) wm_desk_add_app(add_choices[i]);
+}
+
 static void desk_menu_cb(int i, void *ctx) {
     (void)ctx;
     if (i == 0) app_terminal_open();
     else if (i == 1) app_files_open(NULL);
-    else if (i == 3) { g_set.wallpaper = (g_set.wallpaper + 1) % WALLPAPER_COUNT; settings_save(); wm_theme_changed(); }
-    else if (i == 4) app_settings_open();
+    else if (i == 3) {                       /* applications qui ne sont pas encore sur le bureau */
+        static const char *names[APP_COUNT];
+        add_n = 0;
+        for (int a = 0; a < APP_COUNT; a++) {
+            bool on = false;
+            for (int j = 0; j < NDESK; j++) if (g_set.desk[j].app == a) on = true;
+            if (!on) { add_choices[add_n] = a; names[add_n++] = app_name(a); }
+        }
+        if (!add_n) { wm_toast("Toutes les applications sont déjà sur le bureau."); return; }
+        wm_menu(mx, my, names, add_n, add_menu_cb, NULL);
+    }
+    else if (i == 5) { g_set.wallpaper = (g_set.wallpaper + 1) % WALLPAPER_COUNT; settings_save(); wm_theme_changed(); }
+    else if (i == 6) app_settings_open();
+}
+
+static int menu_app_pick;
+static void menu_app_cb(int i, void *ctx) {
+    (void)ctx;
+    close_menu();
+    if (i == 0) app_open(menu_app_pick);
+    else if (i == 1 && wm_desk_add_app(menu_app_pick)) wm_toast("Ajouté au bureau.");
 }
 
 static void click_desktop(int x, int y, int button, bool dbl) {
     int hit = -1;
-    for (int i = 0; i < countof(desk_icons); i++) if (rect_has(desk_icon_rect(i), x, y)) hit = i;
+    for (int i = 0; i < NDESK; i++) if (rect_has(desk_icon_rect(i), x, y)) hit = i;
     if (hit != desk_sel) {
         if (desk_sel >= 0) damage(desk_icon_rect(desk_sel), 0);
         desk_sel = hit;
         if (hit >= 0) damage(desk_icon_rect(hit), 0);
     }
-    if (button == BTN_LEFT && dbl && hit >= 0) { app_open(desk_icons[hit]); return; }
+    if (button == BTN_LEFT && dbl && hit >= 0) { desk_open(hit); return; }
     if (button == BTN_LEFT && hit >= 0) {
         rect_t r = desk_icon_rect(hit);
         desk_drag = hit;
@@ -1542,8 +1656,13 @@ static void click_desktop(int x, int y, int button, bool dbl) {
         desk_drag_x0 = x;
         desk_drag_y0 = y;
     }
-    if (button == BTN_RIGHT) {
-        static const char *items[] = { "Ouvrir le Terminal", "Ouvrir les Fichiers", "-", "Fond d'écran suivant", "Paramètres…" };
+    if (button == BTN_RIGHT && hit >= 0) {
+        static const char *items[] = { "Ouvrir", "-", "Retirer du bureau" };
+        menu_icon_idx = hit;
+        wm_menu(x, y, items, countof(items), icon_menu_cb, NULL);
+    } else if (button == BTN_RIGHT) {
+        static const char *items[] = { "Ouvrir le Terminal", "Ouvrir les Fichiers", "-", "Ajouter une application au bureau…", "-",
+                                       "Fond d'écran suivant", "Paramètres…" };
         wm_menu(x, y, items, countof(items), desk_menu_cb, NULL);
     }
 }
@@ -1583,24 +1702,14 @@ static void mouse_button(const event_t *e) {
                 int c, r, oc, orow;
                 desk_target(&c, &r);
                 desk_cell(desk_drag, &oc, &orow);
-                for (int j = 0; j < countof(desk_icons); j++) {     /* la case est prise : échange */
-                    int jc, jr;
-                    desk_cell(j, &jc, &jr);
-                    if (j != desk_drag && jc == c && jr == r) {
-                        g_set.desk_col[desk_icons[j]] = (signed char)oc;
-                        g_set.desk_row[desk_icons[j]] = (signed char)orow;
-                    }
-                }
-                /* les icônes sans case choisie gardent leur place actuelle */
-                for (int j = 0; j < countof(desk_icons); j++) {
-                    if (j == desk_drag || g_set.desk_col[desk_icons[j]] >= 0) continue;
-                    int jc, jr;
-                    desk_cell(j, &jc, &jr);
-                    g_set.desk_col[desk_icons[j]] = (signed char)jc;
-                    g_set.desk_row[desk_icons[j]] = (signed char)jr;
-                }
-                g_set.desk_col[desk_icons[desk_drag]] = (signed char)c;
-                g_set.desk_row[desk_icons[desk_drag]] = (signed char)r;
+                /* toutes les icônes prennent leur case actuelle comme case choisie */
+                int cc[DESK_MAX], rr[DESK_MAX];
+                for (int j = 0; j < NDESK; j++) desk_cell(j, &cc[j], &rr[j]);
+                for (int j = 0; j < NDESK; j++) { g_set.desk[j].col = (signed char)cc[j]; g_set.desk[j].row = (signed char)rr[j]; }
+                for (int j = 0; j < NDESK; j++)          /* la case est prise : échange */
+                    if (j != desk_drag && cc[j] == c && rr[j] == r) { g_set.desk[j].col = (signed char)oc; g_set.desk[j].row = (signed char)orow; }
+                g_set.desk[desk_drag].col = (signed char)c;
+                g_set.desk[desk_drag].row = (signed char)r;
                 settings_save();
                 sound_play(SFX_TICK);
                 damage(R(0, 0, scr_w, scr_h - DOCK_H - 20), 0);
@@ -1622,7 +1731,12 @@ static void mouse_button(const event_t *e) {
     }
     if (menu_open) {
         if (rect_has(menu_rect(), mx, my)) {
-            if (menu_hover >= 0 && menu_hover < 100) { int a = menu_apps[menu_hover]; close_menu(); app_open(a); }
+            if (menu_hover >= 0 && menu_hover < 100 && e->button == BTN_RIGHT) {   /* clic droit : ouvrir ou ajouter au bureau */
+                static const char *items[] = { "Ouvrir", "Ajouter au bureau" };
+                menu_app_pick = menu_apps[menu_hover];
+                wm_menu(mx, my, items, 2, menu_app_cb, NULL);
+            }
+            else if (menu_hover >= 0 && menu_hover < 100) { int a = menu_apps[menu_hover]; close_menu(); app_open(a); }
             else if (menu_hover == 100) { close_menu(); wm_lock(); }
             else if (menu_hover >= 101) { close_menu(); sound_play(SFX_CLICK); wm_power(menu_hover == 101); }
             return;
@@ -1827,7 +1941,8 @@ void core_event(const event_t *e) {
         if ((e->mods & MOD_SUPER) && e->key == K_CHAR && (e->ch == 'l' || e->ch == 'L')) { wm_lock(); return; }
         if (cal_open && e->key == K_ESC) { toggle_cal(); return; }
         if (alive(focused) && focused->event && !focused->minimized) focused->event(focused, e);
-        else if (e->key == K_ENTER && desk_sel >= 0) app_open(desk_icons[desk_sel]);
+        else if (e->key == K_ENTER && desk_sel >= 0) desk_open(desk_sel);
+        else if (e->key == K_DELETE && desk_sel >= 0) desk_remove(desk_sel);
         return;
     }
     if (e->type == EV_MOTION) {

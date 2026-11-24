@@ -25,8 +25,8 @@ typedef __builtin_va_list va_list;
 #define false 0
 #define NULL  ((void *)0)
 
-#define TITANOS_VERSION "Bêta 22"
-#define TITANOS_BUILD   22             /* numéro de version, comparé aux mises à jour publiées */
+#define TITANOS_VERSION "Bêta 23"
+#define TITANOS_BUILD   23             /* numéro de version, comparé aux mises à jour publiées */
 #define countof(a) ((int)(sizeof(a) / sizeof((a)[0])))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -164,7 +164,8 @@ bool  plat_browser_frame(uint32_t *dst, int stride, int w, int h);   /* true si 
 bool  plat_browser_running(void);
 void  plat_browser_input(int type, int detail, int x, int y);       /* événement X11 (XTEST) */
 void  plat_browser_stop(void);
-void  plat_browser_resize(int w, int h);                    /* taille de la fenêtre de Chromium */                                  /* heure système -> horloge du PC (UTC) */
+void  plat_browser_resize(int w, int h);
+void  plat_browser_open_url(const char *url);              /* nouvel onglet (ou au démarrage) */                    /* taille de la fenêtre de Chromium */                                  /* heure système -> horloge du PC (UTC) */
 int   plat_brightness(int set);                             /* set<0 : lecture ; 0-100 ou -1 */
 void  plat_sync(void);
 

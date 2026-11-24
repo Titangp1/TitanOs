@@ -26,6 +26,10 @@ void  sound_play(int id);
 /* ---------------- réglages (settings.c) ---------------- */
 #define WALLPAPER_COUNT 6
 #define ACCENT_COUNT    6
+/* raccourci du bureau : une application (app >= 0) ou un fichier / dossier (path) */
+#define DESK_MAX 32
+typedef struct { signed char app, col, row; char path[180]; } desk_item_t;
+
 typedef struct {
     int  wallpaper, accent;
     char user[32];
@@ -39,7 +43,8 @@ typedef struct {
     int  volume;          /* volume général, 0-100 */
     int  pointer;         /* vitesse du pointeur, 1-5 */
     char pass[64];        /* empreinte du mot de passe de session (vide : aucun) */
-    signed char desk_col[32], desk_row[32];   /* icônes du bureau : case choisie (-1 : par défaut) */
+    desk_item_t desk[DESK_MAX];   /* raccourcis du bureau ; col = -1 : rangé automatiquement */
+    int  ndesk;
 } settings_t;
 void settings_pass_hash(const char *pw, char out[64]);   /* empreinte d'un mot de passe */
 bool settings_pass_check(const char *pw);                /* le mot de passe correspond-il ? */
@@ -101,6 +106,9 @@ void      browser_autoinstall(bool online);
 void      wm_set_title(window_t *w, const char *t);
 void      wm_resize(window_t *w, int client_w, int client_h);
 void      wm_maximize(window_t *w);
+bool      wm_desk_add_app(int app);          /* raccourci d'application sur le bureau */
+bool      wm_desk_add_path(const char *path); /* raccourci de fichier ou de dossier */
+void      open_path(const char *path);       /* ouvre un fichier avec l'application qui convient */
 void      wm_focus(window_t *w);
 window_t *wm_focused(void);
 window_t *wm_find(int icon);

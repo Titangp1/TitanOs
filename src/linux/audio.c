@@ -161,7 +161,8 @@ static void audio_main(int rd) {
             memset(mix, 0, sizeof mix);
             pcm_write(pcm, mix, PERIOD);
             sys_ioctl(pcm, SNDRV_PCM_IOCTL_DRAIN, NULL);
-            sys_ioctl(pcm, SNDRV_PCM_IOCTL_PREPARE, NULL);
+            sys_close(pcm);                             /* sortie rendue : Chromium et les autres applications peuvent jouer */
+            pcm = -1;
         }
     }
 }

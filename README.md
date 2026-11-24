@@ -80,10 +80,10 @@ Il faut 512 Mo de mémoire au minimum. Une fois TitanOs installé, les nouvelles
 | Application | Rôle |
 |---|---|
 | **Chromium** | Navigateur web complet (onglets, favoris, mots de passe), avec la disposition de clavier de TitanOs. |
-| **Fichiers** | Dossiers et fichiers : créer, renommer (F2), dupliquer, supprimer avec confirmation. Les clés USB branchées apparaissent, avec un bouton *Éjecter*. |
+| **Fichiers** | Dossiers et fichiers : créer, renommer (F2), dupliquer, supprimer avec confirmation. Chaque fichier s'ouvre avec la bonne application : textes dans le Bloc-notes, images dans la visionneuse, PDF, vidéos, musique et pages web dans Chromium. Les archives (zip, tar.gz, tar.xz…) s'extraient d'un double-clic. Les clés USB branchées apparaissent, avec un bouton *Éjecter*. |
 | **Terminal** | Vrai terminal (VT100/xterm, 256 couleurs, historique). `aide` liste les commandes. |
 | **Bloc-notes** | Édition UTF-8, sélection, copier/coller, Ctrl+S / Ctrl+O. Avertit avant de fermer un texte non enregistré. |
-| **Image** | Visionneuse PNG et BMP, ajustée à la fenêtre ; ← → pour l'image suivante. |
+| **Image** | Visionneuse JPEG (séquentiel et progressif, orientation EXIF), PNG, GIF, BMP et PPM, ajustée à la fenêtre ; ← → pour l'image suivante. |
 | **Calculatrice** | À la souris ou au clavier. |
 | **Paramètres** | Personnalisation, écran, son, clavier et souris, réseau, date et heure, compte (mot de passe de session), système. |
 | **Système** | Machine, températures, batterie, matériel PCI/USB avec son pilote, processus. |
@@ -102,7 +102,9 @@ Il faut 512 Mo de mémoire au minimum. Une fois TitanOs installé, les nouvelles
 | Windows+L | Verrouiller la session |
 | Impr. écran | Capture d'écran, enregistrée dans *Images* |
 
-Le bouton rond en bas à gauche propose : mettre en veille, redémarrer ou éteindre. Les icônes du bureau se déplacent à la souris : elles se rangent dans une grille et gardent leur place.
+Le bouton rond en bas à gauche propose : mettre en veille, redémarrer ou éteindre.
+
+**Bureau** : les icônes se déplacent à la souris. Elles se rangent dans une grille qui couvre tout l'écran, et gardent leur place. Pour ajouter un raccourci, faites un clic droit sur le bureau, sur une application du menu Démarrer, ou sur un fichier ou un dossier dans Fichiers. Pour le retirer : clic droit sur l'icône → « Retirer du bureau ».
 
 ## Matériel
 
@@ -186,7 +188,8 @@ PC allumé ──────►│                                             
 build.py              compile tout ; « preview » pour les captures
 boot/                 MBR, chargeur BIOS (stage2.S), chargeur UEFI (efiboot.c)
 src/core/             le bureau, indépendant du système
-  gfx.c glass.c icons.c png.c     dessin lissé, verre, logo et icônes, images PNG
+  gfx.c glass.c icons.c           dessin lissé, verre, logo et icônes
+  png.c jpeg.c                     images PNG, BMP, JPEG, GIF, PPM
   wm.c ui.c sound.c                fenêtres, dock, animations, widgets, sons
   apps.c term.c files.c notes.c prefs.c sysapp.c netapp.c updapp.c imgview.c browser.c   applications
 src/linux/            ce qui parle au noyau (appels système directs, sans libc)

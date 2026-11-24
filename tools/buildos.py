@@ -350,7 +350,7 @@ def build(repo, B):
 
     print("[image disque]")
     import mkimage
-    readme = ("TitanOs beta 22 - systeme d'exploitation sur base Linux\r\n\r\n"
+    readme = ("TitanOs beta 23 - systeme d'exploitation sur base Linux\r\n\r\n"
               "TITANOS\\VMLINUZ     noyau Linux\r\n"
               "TITANOS\\INITRD.IMG  systeme TitanOs (bureau, pilotes, BusyBox)\r\n"
               "EFI\\BOOT\\BOOTX64.EFI chargeur UEFI (Secure Boot desactive)\r\n"
@@ -366,6 +366,6 @@ def build(repo, B):
     write_update(out, info, s2, vmlinuz, initrd, bootimg.build(ttc))
     print(f"  noyau au secteur {info['kernel_lba']}, initramfs au secteur {info['initrd_lba']}, "
           f"chargé à {info['initrd_addr'] >> 20} Mo ; {info['free_mb']} Mo libres pour vos fichiers")
-    print(f"\nTitanOs bêta 22 est prêt :")
+    print(f"\nTitanOs bêta 23 est prêt :")
     print(f"  build/titanos.img   image pour clé USB ({DISK_MB} Mo, démarre en BIOS et en UEFI)")
     print(f"  build/titanos.vhd   disque virtuel (VirtualBox, Hyper-V génération 1)")

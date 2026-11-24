@@ -187,8 +187,14 @@ static void defaults(void) {
     g_set.brightness = -1;
     g_set.glass = 1;
     g_set.pointer = 3;
-    memset(g_set.desk_col, -1, sizeof g_set.desk_col);
-    memset(g_set.desk_row, -1, sizeof g_set.desk_row);
+    static const int def[] = { ICON_FILES, ICON_BROWSER, ICON_TERMINAL, ICON_NOTES, ICON_SETTINGS, ICON_SYSTEM, ICON_ABOUT };
+    g_set.ndesk = 0;
+    for (int i = 0; i < (int)(sizeof def / sizeof def[0]); i++) {
+        desk_item_t *d = &g_set.desk[g_set.ndesk++];
+        d->app = (signed char)def[i];
+        d->col = d->row = -1;
+        d->path[0] = 0;
+    }
 }
 
 void settings_load(void) {
@@ -219,18 +225,44 @@ void settings_load(void) {
             else if (!strcmp(k, "volume")) g_set.volume = CLAMP(n, 0, 100);
             else if (!strcmp(k, "pointeur")) g_set.pointer = CLAMP(n, 1, 5);
             else if (!strcmp(k, "mot_de_passe")) strlcpy(g_set.pass, v, sizeof g_set.pass);
-            else if (!strcmp(k, "icones")) {               /* « icône:colonne:ligne,... » */
+            else if (!strcmp(k, "icones")) {               /* ancien format (bêtas 18 à 22) : « icône:colonne:ligne,... » */
                 for (const char *q = v; *q;) {
                     int ic = atoi(q), col = -1, row = -1;
                     const char *c1 = strchr(q, ':');
                     if (c1) { col = atoi(c1 + 1); const char *c2 = strchr(c1 + 1, ':'); if (c2) row = atoi(c2 + 1); }
-                    if (ic >= 0 && ic < 32 && col >= 0 && row >= 0 && col < 100 && row < 100) { g_set.desk_col[ic] = (signed char)col; g_set.desk_row[ic] = (signed char)row; }
+                    for (int i = 0; i < g_set.ndesk; i++)
+                        if (g_set.desk[i].app == ic && col >= 0 && row >= 0 && col < 100 && row < 100) { g_set.desk[i].col = (signed char)col; g_set.desk[i].row = (signed char)row; }
                     const char *nx = strchr(q, ',');
                     if (!nx) break;
                     q = nx + 1;
                 }
             }
-        }
+            else if (!strcmp(k, "bureau")) {               /* « a,app,col,ligne|f,col,ligne,chemin|... » */
+                g_set.ndesk = 0;
+                for (const char *q = v; *q && g_set.ndesk < DESK_MAX;) {
+                    const char *end = strchr(q, '|');
+                    char item[200];
+                    size_t len = end ? (size_t)(end - q) : strlen(q);
+                    if (len >= sizeof item) len = sizeof item - 1;
+                    memcpy(item, q, len);
+                    item[len] = 0;
+                    desk_item_t *d = &g_set.desk[g_set.ndesk];
+                    memset(d, 0, sizeof *d);
+                    if (item[0] == 'a' && item[1] == ',') {
+                        int a = atoi(item + 2), col = -1, row = -1;
+                        char *c1 = strchr(item + 2, ',');
+                        if (c1) { col = atoi(c1 + 1); char *c2 = strchr(c1 + 1, ','); if (c2) row = atoi(c2 + 1); }
+                        if (a >= 0 && a < APP_COUNT) { d->app = (signed char)a; d->col = (signed char)col; d->row = (signed char)row; g_set.ndesk++; }
+                    } else if (item[0] == 'f' && item[1] == ',') {
+                        int col = atoi(item + 2), row = -1;
+                        char *c1 = strchr(item + 2, ','), *c2 = c1 ? strchr(c1 + 1, ',') : NULL;
+                        if (c1) row = atoi(c1 + 1);
+                        if (c2 && c2[1]) { d->app = -1; d->col = (signed char)col; d->row = (signed char)row; strlcpy(d->path, c2 + 1, sizeof d->path); g_set.ndesk++; }
+                    }
+                    if (!end) break;
+                    q = end + 1;
+                }
+            }        }
         p = nl + 1;
     }
     free(data);
@@ -354,15 +386,18 @@ bool settings_pass_check(const char *pw) {
 }
 
 void settings_save(void) {
-    char buf[1200];
+    static char buf[8192];
     int n = snprintf(buf, sizeof buf,
                      "# Réglages de TitanOs\nfond=%d\naccent=%d\nutilisateur=%s\nsecondes=%d\nclavier=%s\n"
                      "fuseau=%d\nhorloge_locale=%d\nluminosite=%d\nverre=%d\nsons=%d\nvolume=%d\npointeur=%d\nmot_de_passe=%s\n",
                      g_set.wallpaper, g_set.accent, g_set.user, g_set.seconds, g_set.layout ? "us" : "fr",
                      g_set.tz, g_set.rtc_local, g_set.brightness, g_set.glass, g_set.sounds, g_set.volume, g_set.pointer, g_set.pass);
-    n += snprintf(buf + n, sizeof buf - (size_t)n, "icones=");
-    for (int i = 0; i < 32; i++)
-        if (g_set.desk_col[i] >= 0) n += snprintf(buf + n, sizeof buf - (size_t)n, "%d:%d:%d,", i, g_set.desk_col[i], g_set.desk_row[i]);
+    n += snprintf(buf + n, sizeof buf - (size_t)n, "bureau=");
+    for (int i = 0; i < g_set.ndesk; i++) {
+        const desk_item_t *d = &g_set.desk[i];
+        if (d->app >= 0) n += snprintf(buf + n, sizeof buf - (size_t)n, "%sa,%d,%d,%d", i ? "|" : "", d->app, d->col, d->row);
+        else n += snprintf(buf + n, sizeof buf - (size_t)n, "%sf,%d,%d,%s", i ? "|" : "", d->col, d->row, d->path);
+    }
     n += snprintf(buf + n, sizeof buf - (size_t)n, "\n");
     plat_writefile(plat_config_path(), buf, (size_t)n);
 }
