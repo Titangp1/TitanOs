@@ -333,18 +333,23 @@ static void disk_cb(const char *name, int type, void *ctx) {
     if (!strcmp(name, c->boot)) return;
     char p[96], v[64];
     snprintf(p, sizeof p, "/sys/block/%s/removable", name);
-    if (read_file(p, v, sizeof v) > 0 && v[0] == '1') return;
+    bool rem = read_file(p, v, sizeof v) > 0 && v[0] == '1';
+    snprintf(p, sizeof p, "/sys/block/%s", name);
+    char link[256];
+    long lr = sys_readlink(p, link, sizeof link - 1);
+    if (lr > 0) { link[lr] = 0; if (strstr(link, "/usb")) rem = true; }
     snprintf(p, sizeof p, "/sys/block/%s/size", name);
     if (read_file(p, v, sizeof v) <= 0) return;
     uint64_t bytes = (uint64_t)strtol(v, NULL, 10) * 512;
-    if (bytes < (4ull << 30)) return;                   /* au moins 4 Go */
+    if (bytes < (1ull << 30)) return;                   /* au moins 1 Go */
     disk_info_t *d = &c->list[c->n++];
     memset(d, 0, sizeof *d);
     strlcpy(d->dev, name, sizeof d->dev);
     d->bytes = bytes;
+    d->removable = rem;
     snprintf(p, sizeof p, "/sys/block/%s/device/model", name);
     if (read_file(p, v, sizeof v) > 0) strlcpy(d->model, trim(v), sizeof d->model);
-    if (!d->model[0]) strlcpy(d->model, "Disque interne", sizeof d->model);
+    if (!d->model[0]) strlcpy(d->model, rem ? "Clé USB" : "Disque interne", sizeof d->model);
 }
 
 int plat_install_disks(disk_info_t *list, int max) {
@@ -424,7 +429,7 @@ static void install_main(void *arg) {
     sys_sync();
     if (!ok) { say(UPD_ERROR, -1, "Écriture de la table de partitions impossible."); return; }
     klog("installation terminée sur %s", dst);
-    say(UPD_DONE, 100, "TitanOs est installé. Éteignez, retirez la clé puis rallumez l'ordinateur.");
+    say(UPD_DONE, 100, "TitanOs est installé. Pour démarrer dessus, choisissez ce disque au démarrage de l'ordinateur.");
 }
 
 bool plat_install_start(const char *dev) {

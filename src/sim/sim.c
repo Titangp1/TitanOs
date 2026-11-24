@@ -58,7 +58,7 @@ int plat_listdir(const char *path, dirent_t **out) {
     return n;
 }
 int plat_readfile(const char *path, char **data, size_t *len) {
-    const char *t = "Bienvenue dans TitanOs (bêta 10) !\n\nCe Bloc-notes enregistre vos textes sur la clé USB.\n"
+    const char *t = "Bienvenue dans TitanOs (bêta 11) !\n\nCe Bloc-notes enregistre vos textes sur la clé USB.\n"
                     "Le système tourne sur le noyau Linux, mais tout ce que vous voyez est fait maison.\n";
     if (str_ends(path, ".cfg")) return -1;
     *len = strlen(t);
@@ -81,7 +81,7 @@ int plat_pty_read(int id, char *buf, int n) {
     if (pty_sent[id & 7]) return 0;
     pty_sent[id & 7] = true;
     const char *s =
-        "\x1b[1;35mTitanOs bêta 10\x1b[0m - noyau Linux 6.18.65 - BusyBox 1.37\r\n"
+        "\x1b[1;35mTitanOs bêta 11\x1b[0m - noyau Linux 6.18.65 - BusyBox 1.37\r\n"
         "Tapez \x1b[1maide\x1b[0m pour la liste des commandes.\r\n\r\n"
         "\x1b[1;32mtitan\x1b[0m@\x1b[36mtitanos\x1b[0m:\x1b[1;34m~\x1b[0m$ ls\r\n"
         "\x1b[1;34mDocuments\x1b[0m  \x1b[1;34mImages\x1b[0m  \x1b[1;34mMusique\x1b[0m  Bienvenue.txt  vacances.png\r\n"
@@ -231,7 +231,13 @@ int  plat_install_disks(disk_info_t *list, int max) {
     strlcpy(list->dev, "sda", sizeof list->dev);
     strlcpy(list->model, "ST9500325AS", sizeof list->model);
     list->bytes = 500107862016ull;
-    return 1;
+    if (max < 2) return 1;
+    memset(list + 1, 0, sizeof *list);
+    strlcpy(list[1].dev, "sdb", sizeof list[1].dev);
+    strlcpy(list[1].model, "USB DISK 3.0", sizeof list[1].model);
+    list[1].bytes = 15854469120ull;
+    list[1].removable = true;
+    return 2;
 }
 bool plat_install_start(const char *dev) { (void)dev; return true; }
 int  plat_install_state(char *msg, int n, int *percent) { if (msg && n) msg[0] = 0; if (percent) *percent = -1; return UPD_IDLE; }

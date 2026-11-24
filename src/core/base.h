@@ -25,8 +25,8 @@ typedef __builtin_va_list va_list;
 #define false 0
 #define NULL  ((void *)0)
 
-#define TITANOS_VERSION "Bêta 10"
-#define TITANOS_BUILD   10             /* numéro de version, comparé aux mises à jour publiées */
+#define TITANOS_VERSION "Bêta 11"
+#define TITANOS_BUILD   11             /* numéro de version, comparé aux mises à jour publiées */
 #define countof(a) ((int)(sizeof(a) / sizeof((a)[0])))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -163,11 +163,11 @@ void  plat_diag(char *buf, int n);                   /* ligne de diagnostic (bê
 
 /* mises à jour (GitHub) et installation sur le disque interne */
 enum { UPD_IDLE, UPD_CHECKING, UPD_UPTODATE, UPD_DOWNLOADING, UPD_INSTALLING, UPD_DONE, UPD_ERROR };
-typedef struct { char dev[16]; char model[48]; uint64_t bytes; } disk_info_t;
+typedef struct { char dev[16]; char model[48]; uint64_t bytes; bool removable; } disk_info_t;
 void  plat_update_check(bool automatic);                   /* recherche, télécharge et installe */
 int   plat_update_state(char *msg, int n, int *percent);   /* UPD_* ; percent -1 si inconnu */
 bool  plat_install_possible(void);                         /* démarré depuis une clé USB */
-int   plat_install_disks(disk_info_t *list, int max);      /* disques internes utilisables */
+int   plat_install_disks(disk_info_t *list, int max);      /* disques et clés utilisables (sauf celui en cours) */
 bool  plat_install_start(const char *dev);                 /* efface le disque et y copie TitanOs */
 int   plat_install_state(char *msg, int n, int *percent);
 
