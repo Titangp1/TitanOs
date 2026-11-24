@@ -57,6 +57,7 @@ static void net_draw(window_t *w, canvas_t *c) {
     else if (s->wstate == WIFI_CONNECTED) snprintf(st, sizeof st, "Connecté à « %s »", s->wssid);
     else if (s->wstate == WIFI_CONNECTING) strlcpy(st, "Connexion en cours…", sizeof st);
     else if (s->wstate == WIFI_BLOCKED) strlcpy(st, "Radio coupée par l'interrupteur", sizeof st);
+    else if (s->wstate == WIFI_REFUSED) strlcpy(st, "Mot de passe refusé : clic droit sur le réseau, « Oublier », puis réessayez", sizeof st);
     else strlcpy(st, "Non connecté", sizeof st);
     text_draw(c, &font_small, 58, 36, st, s->wstate == WIFI_CONNECTED ? 0xFF86EFAC : C_MUTED);
     if (s->wstate != WIFI_NONE) ui_button(c, refresh_rect(c), "Actualiser", BTN_NORMAL, s->hover == H_REFRESH);

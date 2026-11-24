@@ -2,7 +2,7 @@
  *
  * Mise à jour : la dernière version publiée sur github.com/Titangp1/TitanOs est comparée
  * à celle-ci (TITANOS_BUILD). Si elle est plus récente, son paquet titanos-maj.tar.gz est
- * téléchargé (wget de BusyBox, en HTTPS), ses sommes SHA-256 sont vérifiées, puis les
+ * téléchargé (curl, en HTTPS, certificats vérifiés), ses sommes SHA-256 sont vérifiées, puis les
  * fichiers du système sont réécrits sur place : ils ont une taille fixe et donc toujours
  * les mêmes secteurs (voir tools/mkimage.py), ce qui permet au chargeur BIOS de les
  * retrouver. Le chargeur lui-même (MBR et 2e étape) est réécrit en dernier.
@@ -211,7 +211,7 @@ static void update_main(void *arg) {
     char *rm[] = { "/bin/busybox", "rm", "-rf", WORK, NULL };
     run(rm);
     mkdirs(WORK);
-    char *api[] = { "/bin/busybox", "sh", "-c", "/bin/busybox wget -q -T 20 -O " WORK "/api.json "
+    char *api[] = { "/bin/busybox", "sh", "-c", "/usr/bin/curl -fsS --max-time 20 -o " WORK "/api.json "
                     "'https://api.github.com/repos/" REPO "/releases?per_page=1' 2> " WORK "/erreur", NULL };
     if (run(api) != 0) {
         char why[160];
@@ -238,7 +238,7 @@ static void update_main(void *arg) {
     /* téléchargement, avec la taille reçue affichée */
     char url[192];
     snprintf(url, sizeof url, "https://github.com/" REPO "/releases/download/%s/titanos-maj.tar.gz", tag);
-    char *get[] = { "/bin/busybox", "wget", "-q", "-T", "30", "-O", WORK "/maj.tar.gz", url, NULL };
+    char *get[] = { "/usr/bin/curl", "-fsSL", "--max-time", "900", "-o", WORK "/maj.tar.gz", url, NULL };
     int pid = sys_fork();
     if (pid == 0) {
         int nul = sys_open("/dev/null", O_RDWR, 0);

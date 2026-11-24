@@ -279,7 +279,7 @@ static void tell(const char *s) { sys_write(boot_out, s, strlen(s)); }
  * celui-ci se bloque, le journal continue. */
 static void start_journal(void) {
     static const char script[] =
-        "J=/media/titanos/journal-titanos.txt; i=0; while [ $i -lt 48 ]; do {"
+        "J=/media/titanos/journal-titanos.txt; i=0; while :; do {"
         " echo \"TitanOs " TITANOS_VERSION " - journal, $(cut -d' ' -f1 /proc/uptime) s apres le demarrage\";"
         " echo; echo '== processus (pid nom etat attente)';"
         " for p in /proc/[0-9]*; do echo \"${p#/proc/} $(cat $p/comm) $(cut -d' ' -f3 $p/stat) $(cat $p/wchan)\"; done;"
@@ -289,7 +289,7 @@ static void start_journal(void) {
         " echo; echo '== pilotes'; cut -d' ' -f1 /proc/modules | tr '\\n' ' '; echo;"
         " echo; echo '== blocs'; cat /proc/partitions; echo; echo '== montages'; cat /proc/mounts;"
         " echo; echo '== noyau'; dmesg;"
-        " } > $J 2>&1; sync; sleep 5; i=$((i+1)); done";
+        " } > $J.tmp 2>&1; mv -f $J.tmp $J; sync; i=$((i+1)); [ $i -lt 48 ] && sleep 5 || sleep 30; done";
     char *argv[] = { "/bin/busybox", "sh", "-c", (char *)script, NULL };
     spawn_quiet(argv);
 }
@@ -360,7 +360,7 @@ static void prepare_home(bool on_key, const char *storage) {
     if (first) {
         char p[256];
         snprintf(p, sizeof p, "%s/Bienvenue.txt", home);
-        const char *t = "Bienvenue dans TitanOs (bêta 8) !\n\n"
+        const char *t = "Bienvenue dans TitanOs (bêta 9) !\n\n"
                         "TitanOs tourne sur le noyau Linux : Linux fournit les pilotes (écran, clavier,\n"
                         "USB, Wi-Fi, son...), et tout le reste est écrit pour TitanOs.\n\n"
                         "Vos fichiers sont gardés sur la clé USB, dans le dossier Utilisateur.\n"
