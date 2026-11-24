@@ -320,7 +320,7 @@ static void prepare_home(bool on_key, const char *storage) {
     if (first) {
         char p[256];
         snprintf(p, sizeof p, "%s/Bienvenue.txt", home);
-        const char *t = "Bienvenue dans TitanOs (bêta 3) !\n\n"
+        const char *t = "Bienvenue dans TitanOs (bêta 4) !\n\n"
                         "TitanOs tourne sur le noyau Linux : Linux fournit les pilotes (écran, clavier,\n"
                         "USB, Wi-Fi, son...), et tout le reste est écrit pour TitanOs.\n\n"
                         "Vos fichiers sont gardés sur la clé USB, dans le dossier Utilisateur.\n"
@@ -340,7 +340,43 @@ static void upgrade_display(void) {
     }
 }
 
+/* ================================================================== */
+/* Plantages : la cause est écrite dans le journal du noyau              */
+/* ================================================================== */
+/* En cas d'erreur grave (mauvaise adresse mémoire...), on note le signal, l'adresse fautive
+ * et la chaîne des appels (adresses dans le programme, à traduire avec titanos-init.debug). */
+static void crash_handler(int sig, void *info, void *uctx) {
+    const unsigned long *g = (const unsigned long *)((const char *)uctx + 40);   /* uc_mcontext.gregs */
+    unsigned long rip = g[16], rsp = g[15], rbp = g[10];
+    unsigned long addr = *(const unsigned long *)((const char *)info + 16);      /* si_addr */
+    klog("PLANTAGE pid %d : signal %d, adresse %lx, rip %lx, rsp %lx", sys_getpid(), sig, addr, rip, rsp);
+    char line[260];
+    int n = snprintf(line, sizeof line, "appels :");
+    for (int i = 0; i < 16 && rbp > rsp && rbp < rsp + (8ul << 20) && !(rbp & 7); i++) {
+        const unsigned long *fr = (const unsigned long *)rbp;
+        n += snprintf(line + n, sizeof line - (size_t)n, " %lx", fr[1]);
+        if (fr[0] <= rbp) break;
+        rbp = fr[0];
+    }
+    klog("%s", line);
+    sys_exit(128 + sig);
+}
+
+static void crash_restorer(void) { sys_exit(126); }
+
+static void crash_guard(void) {
+    static uint8_t altstack[65536];
+    struct { void *sp; int flags; int pad; size_t size; } ss = { altstack, 0, 0, sizeof altstack };
+    sc2(__NR_sigaltstack, (long)&ss, 0);
+    struct { void *handler; unsigned long flags; void *restorer; unsigned long mask; } sa = {
+        (void *)crash_handler, 0x4 /* SA_SIGINFO */ | 0x08000000 /* SA_ONSTACK */ | 0x04000000 /* SA_RESTORER */,
+        (void *)crash_restorer, 0 };
+    static const int sigs[] = { 4 /* SIGILL */, 6 /* SIGABRT */, 7 /* SIGBUS */, 8 /* SIGFPE */, 11 /* SIGSEGV */ };
+    for (int i = 0; i < countof(sigs); i++) sys_rt_sigaction(sigs[i], &sa, NULL);
+}
+
 static int session_main(void) {
+    crash_guard();
     /* la console texte du noyau ne doit plus dessiner ni lire le clavier */
     int tty = sys_open("/dev/tty1", O_RDWR | O_CLOEXEC | O_NOCTTY, 0);
     if (tty >= 0) {
@@ -424,6 +460,39 @@ static int session_main(void) {
 /* ================================================================== */
 /* init (PID 1)                                                         */
 /* ================================================================== */
+/* En mode de secours : rapport automatique, affiché à l'écran et copié sur la clé */
+static void rescue_report(void) {
+    const char *m = "\n  Le bureau de TitanOs s'est arrêté plusieurs fois. Préparation du rapport...\n";
+    sys_write(1, m, strlen(m));
+    module_load("evdev");
+    bool on_key = false;
+    for (int i = 0; i < 60 && !on_key; i++) {      /* jusqu'à 15 s pour que la clé USB apparaisse */
+        modules_coldplug(false);
+        on_key = path_exists("/media/titanos/TITANOS") || mount_key();
+        if (!on_key) sleep_ms(250);
+    }
+    static const char script[] =
+        "{ echo \"TitanOs " TITANOS_VERSION " - rapport du mode de secours, $(cut -d' ' -f1 /proc/uptime) s\";"
+        " echo; echo '== pilotes'; cut -d' ' -f1 /proc/modules | tr '\\n' ' '; echo;"
+        " echo; echo '== entrees'; cat /proc/bus/input/devices;"
+        " echo; echo '== blocs'; cat /proc/partitions; ls /sys/class/block;"
+        " echo; echo '== montages'; cat /proc/mounts;"
+        " echo; echo '== pci'; for d in /sys/bus/pci/devices/*; do echo \"${d##*/} $(cat $d/vendor):$(cat $d/device) $(cat $d/class) $(basename $(readlink $d/driver) 2>/dev/null)\"; done;"
+        " echo; echo '== usb'; for d in /sys/bus/usb/devices/*; do [ -f $d/idVendor ] && echo \"${d##*/} $(cat $d/idVendor):$(cat $d/idProduct) $(cat $d/product 2>/dev/null)\"; done;"
+        " echo; echo '== noyau'; dmesg; } > /run/rapport.txt 2>&1;"
+        " [ -d /media/titanos/TITANOS ] && cp /run/rapport.txt /media/titanos/rapport-titanos.txt && sync;"
+        " echo; echo '  Ce qui s est passe (a photographier) :'; echo;"
+        " dmesg | grep -e 'titanos: P' -e 'titanos: appels' -e 'titanos: session' -e 'titanos: cl' -e 'titanos: aucun' -e segfault -e 'traps:' | tail -n 18;"
+        " echo; echo \"  Disques : $(ls /sys/class/block | tr '\n' ' ')\";"
+        " echo \"  Pilotes : $(cut -d' ' -f1 /proc/modules | tr '\n' ' ')\";"
+        " echo; if [ -f /media/titanos/rapport-titanos.txt ]; then echo '  Rapport complet copie sur la cle : rapport-titanos.txt';"
+        " else echo '  Cle TITANOS introuvable : rapport non copie.'; fi; echo";
+    char *argv[] = { "/bin/busybox", "sh", "-c", (char *)script, NULL };
+    int pid = sys_fork();
+    if (pid == 0) { sys_execve(argv[0], argv, g_envp); sys_exit(127); }
+    if (pid > 0) { int st; sys_wait4(pid, &st, 0); }
+}
+
 static int rescue_shell(void) {
     int pid = sys_fork();
     if (pid != 0) return pid;
@@ -435,7 +504,8 @@ static int rescue_shell(void) {
         sys_ioctl(t, KDSKBMODE, (void *)(long)K_UNICODE);
         sys_dup2(t, 0); sys_dup2(t, 1); sys_dup2(t, 2);
     }
-    const char *msg = "\n  TitanOs - mode de secours (shell BusyBox). Tapez « exit » pour relancer le bureau.\n\n";
+    rescue_report();
+    const char *msg = "  TitanOs - mode de secours (shell BusyBox). Tapez « exit » pour relancer le bureau.\n\n";
     sys_write(1, msg, strlen(msg));
     char *argv[] = { "-sh", NULL };
     sys_execve("/bin/sh", argv, g_envp);
@@ -497,7 +567,8 @@ static int init_main(void) {
             uint64_t now = (uint64_t)ts.tv_sec;
             starts[nstarts++ % 5] = now;
             bool looping = nstarts >= 5 && now - starts[nstarts % 5] < 60;
-            klog("session arrêtée (code %d)%s", (st >> 8) & 0xFF, looping ? " : mode de secours" : "");
+            if (st & 0x7F) klog("session arrêtée par le signal %d%s", st & 0x7F, looping ? " : mode de secours" : "");
+            else klog("session arrêtée (code %d)%s", (st >> 8) & 0xFF, looping ? " : mode de secours" : "");
             sleep_ms(500);
             if (looping) { session = -1; shell_pid = rescue_shell(); nstarts = 0; }
             else session = start_session();

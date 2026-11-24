@@ -1,4 +1,4 @@
-# TitanOs — bêta 3
+# TitanOs — bêta 4
 
 Système d'exploitation **léger** sur base Linux, avec un bureau **liquid glass** écrit en C,
 sans bibliothèque, et pensé pour le **Sony VAIO série F** (Core i7, GeForce GT 330M).
@@ -60,7 +60,7 @@ Raccourcis : touche Windows (menu et recherche), Alt+Tab, Alt+F4, Ctrl+Alt+T (Te
 
 ## Installer sur une clé USB
 
-1. Télécharger `titanos-beta3.img.zip` dans les [versions publiées](../../releases), puis le décompresser.
+1. Télécharger `titanos-beta4.img.zip` dans les [versions publiées](../../releases), puis le décompresser.
 2. Écrire `titanos.img` sur une clé USB avec **Rufus, en mode DD**. Cela efface la clé.
    Prenez une clé d'au moins 2 Go : la place libre accueillera les applications.
 3. **Sony VAIO (BIOS)** : touche F2, onglet Boot, activer **External Device Boot** et mettre la clé
@@ -161,6 +161,11 @@ tools/                téléchargement Alpine, polices, initramfs, image disque,
   pendant 4 minutes : messages du noyau, pilotes, périphériques, et l'endroit où chaque processus attend.
   Branchez la clé sur Windows et envoyez ce fichier.
 
+## Nouveautés de la bêta 4
+
+- Si le bureau plante plusieurs fois, le mode de secours affiche la cause à l'écran et copie un rapport
+  complet sur la clé (`rapport-titanos.txt`).
+
 ## Nouveautés de la bêta 3
 
 - Ligne de diagnostic sur l'écran de verrouillage, journal plus complet et écrit plus tôt.
@@ -179,7 +184,7 @@ tools/                téléchargement Alpine, polices, initramfs, image disque,
   - le bureau, les animations et les applications sont rendus et pilotés dans l'aperçu Windows ;
   - le programme Linux et le chargeur UEFI se compilent sans erreur.
 - **Essayé sur le VAIO (bêtas 1 et 2)** : le démarrage et son animation fonctionnent ; l'écran de
-  verrouillage reste figé (souris et clavier sans effet). La bêta 3 sert à trouver pourquoi.
+  verrouillage reste figé (souris et clavier sans effet). La bêta 3 a montré que le bureau plante en boucle ; la bêta 4 en donne la cause.
 - **À tester sur le VAIO** :
   - l'écran de verrouillage et le bureau ;
   - le Wi-Fi, le son, la batterie et les touches Fn ;

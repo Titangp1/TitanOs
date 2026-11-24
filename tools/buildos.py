@@ -220,13 +220,15 @@ def build(repo, B):
                     f.write(data)
 
     print("[programme TitanOs : init + bureau, pour Linux]")
-    flags = ["--target=x86_64-linux-gnu", "-fno-pic", "-fno-pie", "-nostdlibinc", *LINUX_ARCH,
+    flags = ["--target=x86_64-linux-gnu", "-fno-pic", "-fno-pie", "-nostdlibinc", "-fno-omit-frame-pointer", *LINUX_ARCH,
              "-isystem", hdr, "-isystem", os.path.join(root, "src", "linux", "include"), *B.CFLAGS]
     srcs = ([os.path.join(root, "src", "core", s) for s in B.CORE] + gen +
             [os.path.join(root, "src", "linux", s) for s in B.LINUX])
     objs = B.compile_all(clang, srcs, os.path.join(out, "obj-linux"), flags)
     titan = os.path.join(out, "titanos-init")
     B.run([ld_lld, "-static", "-e", "_start", "--gc-sections", "-s", "-o", titan, *objs])
+    # même programme avec ses symboles, pour traduire les adresses d'un rapport de plantage
+    B.run([ld_lld, "-static", "-e", "_start", "--gc-sections", "-o", titan + ".debug", *objs])
     elf = open(titan, "rb").read()
     if elf[:4] != b"\x7fELF" or b".interp" in elf[:4096]:
         raise SystemExit("le programme TitanOs n'est pas un exécutable Linux statique")
@@ -311,7 +313,7 @@ def build(repo, B):
 
     print("[image disque]")
     import mkimage
-    readme = ("TitanOs beta 3 - systeme d'exploitation sur base Linux\r\n\r\n"
+    readme = ("TitanOs beta 4 - systeme d'exploitation sur base Linux\r\n\r\n"
               "TITANOS\\VMLINUZ     noyau Linux\r\n"
               "TITANOS\\INITRD.IMG  systeme TitanOs (bureau, pilotes, BusyBox)\r\n"
               "EFI\\BOOT\\BOOTX64.EFI chargeur UEFI (Secure Boot desactive)\r\n"
@@ -326,6 +328,6 @@ def build(repo, B):
         f.write(s2)
     print(f"  noyau au secteur {info['kernel_lba']}, initramfs au secteur {info['initrd_lba']}, "
           f"chargé à {info['initrd_addr'] >> 20} Mo ; {info['free_mb']} Mo libres pour vos fichiers")
-    print(f"\nTitanOs bêta 3 est prêt :")
+    print(f"\nTitanOs bêta 4 est prêt :")
     print(f"  build/titanos.img   image pour clé USB ({DISK_MB} Mo, démarre en BIOS et en UEFI)")
     print(f"  build/titanos.vhd   disque virtuel (VirtualBox, Hyper-V génération 1)")

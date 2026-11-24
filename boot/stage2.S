@@ -717,7 +717,7 @@ gdtr:
     .word gdt_end - gdt - 1
     .long gdt
 
-m_hello:  .asciz "TitanOs beta 3 - demarrage BIOS\r\n"
+m_hello:  .asciz "TitanOs beta 4 - demarrage BIOS\r\n"
 m_kernel: .asciz "  Noyau Linux "
 m_initrd: .asciz "  Systeme TitanOs "
 m_ok:     .asciz " OK\r\n"
