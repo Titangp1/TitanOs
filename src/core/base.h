@@ -25,7 +25,7 @@ typedef __builtin_va_list va_list;
 #define false 0
 #define NULL  ((void *)0)
 
-#define TITANOS_VERSION "Bêta 1"
+#define TITANOS_VERSION "Bêta 2"
 #define countof(a) ((int)(sizeof(a) / sizeof((a)[0])))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -68,6 +68,7 @@ void  *realloc(void *p, size_t n);
 void   free(void *p);
 void   sort(void *base, size_t n, size_t sz, int (*cmp)(const void *, const void *));
 float  fsin(float x);                       /* sinus et cosinus sans libm */
+float  floorf(float x);
 float  fcos(float x);
 
 /* ---------------- rectangles ---------------- */

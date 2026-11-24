@@ -968,22 +968,27 @@ static void draw_lock(void) {
 #define SPL_LOGO_TOP   (-150)
 #define SPL_LOGO_SIZE  110
 #define SPL_WORD_TOP   (-22)
-#define SPL_SPIN_Y     100
-#define SPL_SPIN_R     18
-#define SPL_DOT_R      3.2f
+#define SPL_ANIM_TOP   82              /* zone des crêtes : 128 x 32, centrée */
+#define SPL_ANIM_W     128
+#define SPL_ANIM_H     32
 #define SPL_TEXT_Y     150
 
-static rect_t spinner_rect(void) { return R(scr_w / 2 - 40, scr_h / 2 + SPL_SPIN_Y - 40, 80, 80); }
+static rect_t spinner_rect(void) { return R(scr_w / 2 - SPL_ANIM_W / 2, scr_h / 2 + SPL_ANIM_TOP, SPL_ANIM_W, SPL_ANIM_H); }
 static rect_t splash_text_rect(void) { return R(0, scr_h / 2 + SPL_TEXT_Y, scr_w, 24); }
 
-/* cercle de points façon Windows : cinq points qui accélèrent en bas et se regroupent en haut */
-static void draw_spinner(float cx, float cy, float t) {
+/* les « crêtes » de TitanOs : cinq petits sommets, comme celui du logo, qui grandissent
+ * et s'éclairent l'un après l'autre, en vague (même calcul que tools/bootimg.py) */
+static void draw_peaks(int x0, int y0, float t) {
+    static const float hgt[5] = { 12, 17, 22, 17, 12 };
+    const float period = 36 / 18.2f, base = (float)y0 + 30;
     for (int i = 0; i < 5; i++) {
-        float p = (t - i * 0.11f) / 2.0f;
-        p -= (float)(int)p;
-        if (p < 0) p += 1;
-        float ang = -1.5708f + 6.2832f * (p - fsin(6.2832f * p) / 6.2832f);
-        gfx_circle(T, cx + fcos(ang) * SPL_SPIN_R, cy + fsin(ang) * SPL_SPIN_R, SPL_DOT_R, 0xFFFFFFFF);
+        float p = t / period - i * 0.12f;
+        p -= floorf(p);
+        float w = 0;
+        if (p < 0.5f) { w = fsin(3.14159265f * p / 0.5f); w *= w; }
+        uint32_t a = (uint32_t)((0.28f + 0.72f * w) * 255 + 0.5f) << 24;
+        float cx = x0 + SPL_ANIM_W / 2.0f + (i - 2) * 24, half = hgt[i] * 0.6f;
+        gfx_tri(T, cx, base - hgt[i] - 6 * w, cx - half, base, cx + half, base, a | 0xE0F2FE, a | 0xE0F2FE);
     }
 }
 
@@ -995,7 +1000,7 @@ static void draw_splash(void) {
         draw_logo(T, scr_w / 2.0f, cy + SPL_LOGO_TOP, SPL_LOGO_SIZE, 255);
         text_draw(T, &font_h1, (scr_w - text_width(&font_h1, "TitanOs")) / 2, cy + SPL_WORD_TOP, "TitanOs", C_TEXT);
     }
-    draw_spinner(scr_w / 2.0f, cy + SPL_SPIN_Y, (float)now / 1000.0f);
+    draw_peaks(scr_w / 2 - SPL_ANIM_W / 2, cy + SPL_ANIM_TOP, (float)now / 1000.0f);
     text_draw(T, &font_small, (scr_w - text_width(&font_small, splash_step)) / 2, cy + SPL_TEXT_Y, splash_step, 0xFF64748B);
 }
 

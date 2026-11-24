@@ -10,7 +10,7 @@ Disque hybride, démarrable en UEFI *et* en BIOS classique :
                   EFI/BOOT/BOOTX64.EFI   chargeur UEFI (boot/efiboot.c)
                   TITANOS/VMLINUZ        noyau Linux
                   TITANOS/INITRD.IMG     système TitanOs (initramfs)
-                  TITANOS/BOOT.IMG       images de l'écran de démarrage (logo, cercle animé)
+                  TITANOS/BOOT.IMG       images de l'écran de démarrage (logo, crêtes animées)
                   Utilisateur/           vos fichiers (créé au premier démarrage)
 
 Les fichiers sont écrits d'un seul tenant : le chargeur BIOS les lit directement par

@@ -79,15 +79,14 @@ static void blit_a(int x0, int y0, int w, int h, const UINT8 *src, UINT32 col) {
 
 static void spinner(void) {
     if (!bi) return;
-    int nf = rd16(bi + 16), nd = rd16(bi + 18), box = rd16(bi + 30), sy = H / 2 + rd16s(bi + 28);
+    int nf = rd16(bi + 16), aw = rd16(bi + 12), ah = rd16(bi + 14);
+    int x0 = W / 2 - aw / 2, y0 = H / 2 + rd16s(bi + 28);
     frame = (frame + 1) % nf;
-    for (int y = sy - box; y < sy + box; y++) {
+    for (int y = y0; y < y0 + ah; y++) {          /* efface la zone des crêtes */
         UINT32 bg = grad(y);
-        for (int x = W / 2 - box; x < W / 2 + box; x++) put(x, y, bg);
+        for (int x = x0; x < x0 + aw; x++) put(x, y, bg);
     }
-    const UINT8 *fr = bi + rd32(bi + 52) + (UINTN)frame * nd * 2;
-    for (int d = 0; d < nd; d++)
-        blit_a(W / 2 + (signed char)fr[2 * d], sy + (signed char)fr[2 * d + 1], rd16(bi + 12), rd16(bi + 14), bi + rd32(bi + 48), 0xFFFFFF);
+    blit_a(x0, y0, aw, ah, bi + rd32(bi + 48) + (UINTN)frame * aw * ah, rd32(bi + 52));
 }
 
 static void draw_splash(void) {
@@ -122,7 +121,7 @@ static void draw_splash(void) {
     spinner();
 }
 
-/* ---- lecture d'un fichier sur la partition de démarrage (le cercle tourne pendant ce temps) ---- */
+/* ---- lecture d'un fichier sur la partition de démarrage (les crêtes s'animent pendant ce temps) ---- */
 static EFI_STATUS read_file(EFI_FILE *root, CHAR16 *path, void **buf, UINTN *size) {
     EFI_FILE *f;
     EFI_STATUS s = root->Open(root, &f, path, 1 /* lecture */, 0);

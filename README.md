@@ -1,4 +1,4 @@
-# TitanOs — bêta 1
+# TitanOs — bêta 2
 
 Système d'exploitation **léger** sur base Linux, avec un bureau **liquid glass** écrit en C,
 sans bibliothèque, et pensé pour le **Sony VAIO série F** (Core i7, GeForce GT 330M).
@@ -15,9 +15,10 @@ Terminal), `wpa_supplicant` (Wi-Fi), `apk` (installer des applications) et `mke2
 
 ## Ce qu'il fait
 
-- **Démarrage soigné, sans coupure** : dès l'allumage, le chargeur affiche le logo, le nom et un
-  **cercle de points animé** pendant qu'il lit la clé. Linux reprend exactement la même image, puis
-  l'écran s'efface en fondu sur l'écran de verrouillage, avec un petit son de démarrage.
+- **Démarrage soigné, sans coupure** : dès l'allumage, le chargeur affiche le logo, le nom et les
+  **crêtes**, l'animation propre à TitanOs : cinq petits sommets, comme celui du logo, qui grandissent
+  et s'éclairent l'un après l'autre pendant qu'il lit la clé. Linux reprend exactement la même image,
+  puis l'écran s'efface en fondu sur l'écran de verrouillage, avec un petit son de démarrage.
 - **Bureau liquid glass** : chaque panneau floute ce qui est derrière lui et réfracte le fond sur ses
   bords. Il a aussi un liseré lumineux et un reflet. Trois niveaux de verre : transparent, normal, dépoli.
 - **Animations** : ouverture et fermeture des fenêtres, réduction vers le dock, menus et calendrier en
@@ -59,7 +60,7 @@ Raccourcis : touche Windows (menu et recherche), Alt+Tab, Alt+F4, Ctrl+Alt+T (Te
 
 ## Installer sur une clé USB
 
-1. Télécharger `titanos-beta1.img.zip` dans les [versions publiées](../../releases), puis le décompresser.
+1. Télécharger `titanos-beta2.img.zip` dans les [versions publiées](../../releases), puis le décompresser.
 2. Écrire `titanos.img` sur une clé USB avec **Rufus, en mode DD**. Cela efface la clé.
    Prenez une clé d'au moins 2 Go : la place libre accueillera les applications.
 3. **Sony VAIO (BIOS)** : touche F2, onglet Boot, activer **External Device Boot** et mettre la clé
@@ -109,7 +110,7 @@ PC allumé ──────►│                                             
 
 - **stage2** :
   - choisit le meilleur mode graphique VBE et dessine l'écran de démarrage (images de `TITANOS/BOOT.IMG`) ;
-  - lit le noyau et le système par blocs, en mode « unreal », en faisant tourner le cercle au rythme de
+  - lit le noyau et le système par blocs, en mode « unreal », en animant les crêtes au rythme de
     l'horloge du BIOS ;
   - remplit la carte mémoire et entre dans Linux par son protocole 32 bits.
 - **efiboot** : dessine le même écran, puis passe le système au noyau par le protocole LoadFile2.
@@ -119,7 +120,8 @@ PC allumé ──────►│                                             
   - relance le bureau s'il s'arrête, et ouvre un mode de secours (shell) s'il plante en boucle.
 - **La session** anime l'écran de démarrage pendant qu'un processus voisin charge les pilotes (la carte
   graphique d'abord), monte la clé et prépare l'espace des applications. Elle lance ensuite le son,
-  le Wi-Fi et le réseau, puis le bureau.
+  le réseau et un « veilleur » : ce processus à part interroge le Wi-Fi et la batterie, qui peuvent
+  être lents, et envoie leur état au bureau. Le bureau ne peut donc jamais attendre le matériel.
 
 ## Personnaliser
 
@@ -150,14 +152,29 @@ rootfs/etc/           profil du shell, script DHCP, dépôts apk
 tools/                téléchargement Alpine, polices, initramfs, image disque, écran de démarrage, tests
 ```
 
+## Si quelque chose ne va pas
+
+Une minute après le démarrage, TitanOs copie son journal (`dmesg`) sur la clé, dans
+`journal-titanos.txt`. Branchez la clé sur Windows et envoyez ce fichier : il indique les pilotes
+chargés, l'écran, le clavier, la souris, le son et le Wi-Fi.
+
+## Nouveautés de la bêta 2
+
+- Correction : l'écran de verrouillage pouvait rester figé (souris et clavier sans effet) quand le Wi-Fi
+  ou la batterie tardaient à répondre. Ils sont maintenant interrogés par un processus séparé.
+- Nouvelle animation de démarrage, propre à TitanOs : les crêtes, à la place du cercle de points.
+- Journal du démarrage enregistré sur la clé.
+
 ## État de la bêta
 
 - **Vérifié** :
   - le chargeur BIOS démarre Linux dans l'émulateur et dessine bien l'écran de démarrage ;
   - le bureau, les animations et les applications sont rendus et pilotés dans l'aperçu Windows ;
   - le programme Linux et le chargeur UEFI se compilent sans erreur.
+- **Essayé sur le VAIO (bêta 1)** : le démarrage et son animation fonctionnent ; l'écran de verrouillage
+  restait figé, ce que corrige la bêta 2.
 - **À tester sur le VAIO** :
-  - le démarrage complet ;
+  - l'écran de verrouillage et le bureau ;
   - le Wi-Fi, le son, la batterie et les touches Fn ;
   - la création de l'espace des applications sur la clé ;
   - le chargeur UEFI.

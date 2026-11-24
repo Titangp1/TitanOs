@@ -415,6 +415,8 @@ void input_read(struct pollfd *p, int n) {
                 *d = devs[--ndevs];
                 break;
             }
+            static bool seen;
+            if (!seen) { seen = true; klog("entrée : premiers événements reçus"); }
             for (int i = 0; i < (int)(r / (long)sizeof(struct input_event)); i++) handle(d, &evs[i]);
         }
     }

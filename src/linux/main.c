@@ -268,6 +268,14 @@ static void boot_worker(int out) {
     tell("D\n");
 }
 
+/* journal du démarrage copié sur la clé (lisible sous Windows) : après 15 s puis après 1 min */
+static void write_journal(void) {
+    char *argv[] = { "/bin/busybox", "sh", "-c",
+        "sleep 15; dmesg > /media/titanos/journal-titanos.txt; sync; "
+        "sleep 45; dmesg > /media/titanos/journal-titanos.txt; sync", NULL };
+    spawn_quiet(argv);
+}
+
 static void prepare_home(bool on_key, const char *storage) {
     const char *home = on_key ? "/media/titanos/Utilisateur" : "/root/Utilisateur";
     plat_set_storage(home, on_key ? "/media/titanos/titanos.cfg" : "/root/titanos.cfg",
@@ -283,7 +291,7 @@ static void prepare_home(bool on_key, const char *storage) {
     if (first) {
         char p[256];
         snprintf(p, sizeof p, "%s/Bienvenue.txt", home);
-        const char *t = "Bienvenue dans TitanOs (bêta 1) !\n\n"
+        const char *t = "Bienvenue dans TitanOs (bêta 2) !\n\n"
                         "TitanOs tourne sur le noyau Linux : Linux fournit les pilotes (écran, clavier,\n"
                         "USB, Wi-Fi, son...), et tout le reste est écrit pour TitanOs.\n\n"
                         "Vos fichiers sont gardés sur la clé USB, dans le dossier Utilisateur.\n"
@@ -321,7 +329,7 @@ static int session_main(void) {
     core_init(display_w(), display_h());
     core_splash("Démarrage du noyau Linux…", 0);
 
-    /* le travail de démarrage se fait à côté ; ici, le cercle tourne */
+    /* le travail de démarrage se fait à côté ; ici, les crêtes s'animent */
     int p[2];
     char storage[96] = "Clé USB TITANOS";
     bool on_key = false;
@@ -361,8 +369,9 @@ static int session_main(void) {
     settings_load();
     if (g_set.brightness >= 0) plat_brightness(g_set.brightness);
     audio_start();
-    wifi_start();
+    hw_start();                              /* Wi-Fi et batterie : processus séparé */
     net_autostart();
+    if (on_key) write_journal();
     input_scan();
     core_start();
     if (!on_key) wm_toast("Clé TITANOS introuvable : vos fichiers ne seront pas conservés.");
@@ -377,7 +386,7 @@ static int session_main(void) {
         plat_tick();
         uint64_t now = plat_ms();
         if (now >= next_scan) { next_scan = now + 1500; input_scan(); }
-        if (now >= next_net) { next_net = now + 3000; net_autostart(); wifi_start(); }
+        if (now >= next_net) { next_net = now + 3000; net_autostart(); }
     }
 }
 

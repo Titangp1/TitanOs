@@ -26,7 +26,8 @@ extern int input_screen_w, input_screen_h;
 
 /* audio.c, wifi.c */
 void audio_start(void);
-void wifi_start(void);
+void hw_start(void);                 /* veilleur : Wi-Fi et batterie, hors du bureau */
+void bat_read(battery_t *b);
 
 /* plat.c */
 void plat_set_storage(const char *home, const char *config, const char *storage);

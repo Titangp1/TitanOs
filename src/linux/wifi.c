@@ -2,7 +2,11 @@
  *
  * wpa_supplicant (Alpine) gère l'authentification WPA ; TitanOs lui parle par une socket
  * locale avec des commandes texte : SCAN, SCAN_RESULTS, STATUS, ADD_NETWORK...
- * Les réseaux enregistrés sont gardés sur la clé (.titanos/wifi.conf). */
+ * Les réseaux enregistrés sont gardés sur la clé (.titanos/wifi.conf).
+ *
+ * Tout ce qui peut être lent (wpa_supplicant, batterie lue par l'ACPI) se fait dans un
+ * processus « veilleur » séparé : il envoie régulièrement un état complet au bureau, qui
+ * ne fait que le lire. L'interface ne peut donc jamais rester bloquée par le matériel. */
 #include "linux.h"
 
 static char iface[16];
@@ -28,8 +32,8 @@ static const char *conf_path(void) {
     return path_exists("/media/titanos") && is_dir("/media/titanos/.titanos") ? "/media/titanos/.titanos/wifi.conf" : "/run/wifi.conf";
 }
 
-/* à appeler quand les pilotes sont chargés, puis de temps en temps (carte branchée plus tard) */
-void wifi_start(void) {
+/* dans le veilleur : prépare le Wi-Fi dès qu'une carte apparaît */
+static void wifi_start(void) {
     if (ctrl >= 0 || plat_ms() < next_try) return;
     next_try = plat_ms() + 4000;
     iface[0] = 0;
@@ -55,6 +59,7 @@ void wifi_start(void) {
             sys_exit(127);
         }
         for (int i = 0; i < 40 && !path_exists(sock); i++) sleep_ms(50);
+        if (!path_exists(sock)) { klog("Wi-Fi : wpa_supplicant ne démarre pas sur %s", iface); return; }
     }
     /* socket locale, reliée à celle de wpa_supplicant */
     int fd = sys_socket(1 /* AF_UNIX */, 2 /* SOCK_DGRAM */ | O_CLOEXEC, 0);
@@ -77,9 +82,14 @@ static int request(const char *cmd, char *reply, int n) {
     if (ctrl < 0) return -1;
     char drain[64];
     while (sys_recv(ctrl, drain, sizeof drain, 0x40 /* MSG_DONTWAIT */) > 0) {}
-    if (sys_write(ctrl, cmd, strlen(cmd)) < 0) { sys_close(ctrl); ctrl = -1; return -1; }
+    /* envoi sans attente : si wpa_supplicant ne lit plus, on abandonne au lieu de bloquer */
+    if (sc6(__NR_sendto, ctrl, (long)cmd, (long)strlen(cmd), 0x40 /* MSG_DONTWAIT */, 0, 0) < 0) {
+        sys_close(ctrl);
+        ctrl = -1;
+        return -1;
+    }
     struct pollfd p = { ctrl, POLLIN, 0 };
-    if (sys_poll(&p, 1, 2500) <= 0) return -1;
+    if (sys_poll(&p, 1, 1500) <= 0) return -1;
     long r = sys_recv(ctrl, reply, (size_t)n - 1, 0);
     if (r < 0) return -1;
     reply[r] = 0;
@@ -137,8 +147,8 @@ static int net_id(const char *ssid) {
     return -1;
 }
 
-/* ---- interface pour le bureau ---- */
-int plat_wifi_status(char *ssid, int n, int *signal) {
+/* ---- commandes (exécutées dans le veilleur) ---- */
+static int w_status(char *ssid, int n, int *signal) {
     ssid[0] = 0;
     *signal = 0;
     if (ctrl < 0) { wifi_start(); if (ctrl < 0) return WIFI_NONE; }
@@ -167,13 +177,13 @@ int plat_wifi_status(char *ssid, int n, int *signal) {
     return WIFI_OFF;
 }
 
-void plat_wifi_scan(void) { ok("SCAN"); }
+static void w_scan(void) { ok("SCAN"); }
 
-int plat_wifi_list(wifi_net_t *list, int max) {
+static int w_list(wifi_net_t *list, int max) {
     static char buf[16384];
     char cur[33];
     int sig;
-    int state = plat_wifi_status(cur, sizeof cur, &sig);
+    int state = w_status(cur, sizeof cur, &sig);
     if (request("SCAN_RESULTS", buf, sizeof buf) <= 0) return 0;
     int n = 0;
     char *line = strchr(buf, '\n');            /* première ligne : en-têtes */
@@ -218,7 +228,7 @@ int plat_wifi_list(wifi_net_t *list, int max) {
     return n;
 }
 
-bool plat_wifi_connect(const char *ssid, const char *psk) {
+static bool w_connect(const char *ssid, const char *psk) {
     if (ctrl < 0) return false;
     char cmd[256], hex[80];
     int id = net_id(ssid);
@@ -249,7 +259,7 @@ bool plat_wifi_connect(const char *ssid, const char *psk) {
     return r;
 }
 
-void plat_wifi_forget(const char *ssid) {
+static void w_forget(const char *ssid) {
     int id = net_id(ssid);
     if (id < 0) return;
     char cmd[48];
@@ -258,4 +268,116 @@ void plat_wifi_forget(const char *ssid) {
     ok("SAVE_CONFIG");
 }
 
-const char *wifi_iface(void) { return iface; }
+/* ================================================================== */
+/* Le veilleur : processus séparé qui interroge le matériel             */
+/* ================================================================== */
+#define SNAP_NETS 32
+typedef struct {
+    battery_t bat;
+    int wstate, wsignal, nnets;
+    char wssid[33];
+    wifi_net_t nets[SNAP_NETS];
+} snap_t;                                     /* < 4096 octets : écrit d'un seul bloc dans le tube */
+typedef struct { int op; char ssid[33]; char psk[72]; } wcmd_t;
+enum { OP_SCAN = 1, OP_CONNECT, OP_FORGET };
+
+static int snap_in = -1, cmd_out = -1;
+static snap_t snap;
+static bool have_snap;
+
+static void helper_main(int out, int in) {
+    for (int fd = 3; fd < 256; fd++) if (fd != out && fd != in) sys_close(fd);
+    uint64_t next = 0;
+    for (;;) {
+        uint64_t now = plat_ms();
+        struct pollfd p = { in, POLLIN, 0 };
+        if (sys_poll(&p, 1, next > now ? (int)(next - now) : 0) > 0) {
+            wcmd_t c;
+            long r = sys_read(in, &c, sizeof c);
+            if (r <= 0) sys_exit(0);                    /* le bureau s'est arrêté */
+            if (r == sizeof c) {
+                if (c.op == OP_SCAN) w_scan();
+                else if (c.op == OP_CONNECT) w_connect(c.ssid, c.psk[0] ? c.psk : NULL);
+                else if (c.op == OP_FORGET) w_forget(c.ssid);
+                next = plat_ms() + 600;                 /* nouvel état peu après */
+            }
+            continue;
+        }
+        int st;
+        while (sys_wait4(-1, &st, WNOHANG_) > 0) {}      /* wpa_supplicant -B laisse un processus fini */
+        snap_t s;
+        memset(&s, 0, sizeof s);
+        bat_read(&s.bat);
+        wifi_start();
+        s.wstate = ctrl >= 0 ? w_status(s.wssid, sizeof s.wssid, &s.wsignal) : WIFI_NONE;
+        if (ctrl >= 0) s.nnets = w_list(s.nets, SNAP_NETS);
+        sys_write(out, &s, sizeof s);                   /* tube non bloquant : perdu si le bureau est en retard */
+        next = plat_ms() + 2000;
+    }
+}
+
+void hw_start(void) {
+    int a[2], b[2];
+    if (sys_pipe2(a, O_CLOEXEC) < 0) return;
+    if (sys_pipe2(b, O_CLOEXEC) < 0) { sys_close(a[0]); sys_close(a[1]); return; }
+    int pid = sys_fork();
+    if (pid == 0) {
+        sys_close(a[0]);
+        sys_close(b[1]);
+        sc3(__NR_fcntl, a[1], F_SETFL, O_NONBLOCK);
+        helper_main(a[1], b[0]);
+        sys_exit(0);
+    }
+    sys_close(a[1]);
+    sys_close(b[0]);
+    if (pid < 0) { sys_close(a[0]); sys_close(b[1]); return; }
+    sc3(__NR_fcntl, a[0], F_SETFL, O_NONBLOCK);
+    sc3(__NR_fcntl, b[1], F_SETFL, O_NONBLOCK);
+    snap_in = a[0];
+    cmd_out = b[1];
+}
+
+static void hw_poll(void) {
+    if (snap_in < 0) return;
+    snap_t s;
+    while (sys_read(snap_in, &s, sizeof s) == sizeof s) { snap = s; have_snap = true; }
+}
+
+static void send_cmd(int op, const char *ssid, const char *psk) {
+    if (cmd_out < 0) return;
+    wcmd_t c;
+    memset(&c, 0, sizeof c);
+    c.op = op;
+    if (ssid) strlcpy(c.ssid, ssid, sizeof c.ssid);
+    if (psk) strlcpy(c.psk, psk, sizeof c.psk);
+    sys_write(cmd_out, &c, sizeof c);
+}
+
+/* ---- interface pour le bureau : réponses immédiates, d'après le dernier état reçu ---- */
+int plat_wifi_status(char *ssid, int n, int *signal) {
+    hw_poll();
+    strlcpy(ssid, have_snap ? snap.wssid : "", (size_t)n);
+    *signal = have_snap ? snap.wsignal : 0;
+    return have_snap ? snap.wstate : WIFI_NONE;
+}
+
+int plat_wifi_list(wifi_net_t *list, int max) {
+    hw_poll();
+    int n = have_snap ? MIN(max, snap.nnets) : 0;
+    memcpy(list, snap.nets, sizeof(wifi_net_t) * (size_t)n);
+    return n;
+}
+
+void plat_wifi_scan(void) { send_cmd(OP_SCAN, NULL, NULL); }
+bool plat_wifi_connect(const char *ssid, const char *psk) {
+    if (!have_snap || snap.wstate == WIFI_NONE) return false;
+    send_cmd(OP_CONNECT, ssid, psk);
+    return true;
+}
+void plat_wifi_forget(const char *ssid) { send_cmd(OP_FORGET, ssid, NULL); }
+
+void plat_battery(battery_t *b) {
+    hw_poll();
+    if (have_snap) *b = snap.bat;
+    else memset(b, 0, sizeof *b);
+}

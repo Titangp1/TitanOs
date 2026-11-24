@@ -576,7 +576,8 @@ static void psu_cb(const char *name, int type, void *ctx) {
     }
 }
 
-void plat_battery(battery_t *b) {
+/* lecture directe (lente sur certains portables : appelée par le veilleur, pas par le bureau) */
+void bat_read(battery_t *b) {
     memset(b, 0, sizeof *b);
     bat_ctx_t c = { b, 0, 0 };
     for_each_dir("/sys/class/power_supply", psu_cb, &c);

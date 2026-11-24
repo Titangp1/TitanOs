@@ -3,7 +3,7 @@
  * Démarre le noyau Linux selon son protocole de démarrage 32 bits :
  *   1. active la ligne A20 et choisit le meilleur mode graphique VBE ;
  *   2. dessine l'écran de démarrage de TitanOs (dégradé, logo, nom) à partir de
- *      TITANOS/BOOT.IMG, puis fait tourner le cercle de points pendant le chargement ;
+ *      TITANOS/BOOT.IMG, puis anime les « crêtes » pendant le chargement ;
  *   3. lit le noyau (partie « mode protégé » du bzImage) et l'initramfs par blocs de
  *      127 secteurs (INT 13h étendu) et les recopie au-delà de 1 Mo en mode « unreal » ;
  *   4. complète la « zero page » (boot_params) : carte mémoire E820 et écran VBE ;
@@ -235,7 +235,7 @@ ld_copy:
     subl    %eax, left
     cmpb    $0, gfx
     je      2f
-    call    spin_update                 /* le cercle tourne pendant la lecture */
+    call    spin_update                 /* les crêtes s'animent pendant la lecture */
     jmp     ld_loop
 2:  incw    dots
     testw   $7, dots                    /* en mode texte : un point tous les 500 Ko environ */
@@ -628,7 +628,7 @@ draw_splash:
     call    spin_update
     ret
 
-/* une image du cercle de points, choisie d'après le compteur du BIOS (18,2 par seconde) */
+/* une image des « crêtes », choisie d'après le compteur du BIOS (18,2 par seconde) */
 spin_update:
     call    unreal                      /* (modifie EAX et BX) */
     movl    0x46C, %eax                 /* tops d'horloge du BIOS */
@@ -640,60 +640,36 @@ spin_update:
     je      9f
     movw    %dx, cur_frame
     pushl   %edx
-    /* efface la zone du cercle */
-    movzwl  30(%esi), %ecx              /* demi-taille de la zone */
+    /* zone de l'animation : centrée horizontalement, haut = centre + anim_top */
+    movzwl  12(%esi), %eax
+    movl    %eax, rw
+    movzwl  14(%esi), %eax
+    movl    %eax, rh
     movl    scr_w, %eax
     shrl    $1, %eax
-    subl    %ecx, %eax
+    movl    rw, %edx
+    shrl    $1, %edx
+    subl    %edx, %eax
     movl    %eax, rx
     movl    scr_h, %eax
     shrl    $1, %eax
     movswl  28(%esi), %edx
     addl    %edx, %eax
-    subl    %ecx, %eax
     movl    %eax, ry
-    shll    $1, %ecx
-    movl    %ecx, rw
-    movl    %ecx, rh
-    call    fill_bg
-    /* les points */
-    popl    %eax                        /* image courante */
+    call    fill_bg                     /* efface l'image précédente */
+    /* image courante : off_anim + numéro x largeur x hauteur */
+    popl    %eax
     movl    $BIMG, %esi
-    movzwl  18(%esi), %ecx              /* points par image */
+    movzwl  12(%esi), %ecx
     imull   %ecx, %eax
-    shll    $1, %eax
-    addl    52(%esi), %eax
-    addl    $BIMG, %eax
-    movl    %eax, frame_ptr
-    movl    %ecx, ndots
-    movl    $0xFFFFFF, fgcol
-1:  cmpl    $0, ndots
-    je      9f
-    movl    $BIMG, %esi
-    movzwl  12(%esi), %eax
-    movl    %eax, rw
-    movzwl  14(%esi), %eax
-    movl    %eax, rh
-    movl    frame_ptr, %edi
-    movsbl  (%edi), %eax                /* décalage horizontal du point */
-    movl    scr_w, %edx
-    shrl    $1, %edx
-    addl    %edx, %eax
-    movl    %eax, rx
-    movsbl  1(%edi), %eax               /* décalage vertical */
-    movl    scr_h, %edx
-    shrl    $1, %edx
-    addl    %edx, %eax
-    movswl  28(%esi), %edx
-    addl    %edx, %eax
-    movl    %eax, ry
-    addl    $2, frame_ptr
-    movl    48(%esi), %eax
+    movzwl  14(%esi), %ecx
+    imull   %ecx, %eax
+    addl    48(%esi), %eax
+    movl    52(%esi), %ecx              /* couleur */
+    movl    %ecx, fgcol
     addl    $BIMG, %eax
     movl    %eax, %esi
     call    blit_a
-    decl    ndots
-    jmp     1b
 9:  ret
 
 /* ---------------- données ---------------- */
@@ -724,8 +700,6 @@ rw:         .long 0
 rh:         .long 0
 bgcol:      .long 0
 fgcol:      .long 0
-frame_ptr:  .long 0
-ndots:      .long 0
 dap:        .byte 0x10, 0
 dap_count:  .word 0
 dap_off:    .word 0
@@ -743,7 +717,7 @@ gdtr:
     .word gdt_end - gdt - 1
     .long gdt
 
-m_hello:  .asciz "TitanOs beta 1 - demarrage BIOS\r\n"
+m_hello:  .asciz "TitanOs beta 2 - demarrage BIOS\r\n"
 m_kernel: .asciz "  Noyau Linux "
 m_initrd: .asciz "  Systeme TitanOs "
 m_ok:     .asciz " OK\r\n"

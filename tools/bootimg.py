@@ -2,7 +2,7 @@
 """Images de l'écran de démarrage pour les chargeurs (TITANOS/BOOT.IMG).
 
 Le chargeur BIOS (boot/stage2.S) et le chargeur UEFI (boot/efiboot.c) dessinent dès
-l'allumage le même écran que TitanOs : dégradé, logo, nom et cercle de points animé.
+l'allumage le même écran que TitanOs : dégradé, logo, nom et les « crêtes » animées.
 Ce module précalcule ces petites images avec exactement la même géométrie que le code C
 (src/core/wm.c, draw_splash) : le passage du chargeur au système est invisible.
 
@@ -10,24 +10,28 @@ Format (petit-boutiste) :
   0   "TBIM"
   4   u16 logo_w, logo_h        logo en BGRA prémultiplié
   8   u16 word_w, word_h        nom « TitanOs » : couverture 8 bits (blanc)
-  12  u16 dot_w, dot_h          point du cercle : couverture 8 bits (blanc)
-  16  u16 nframes, ndots        positions des points pour chaque image de l'animation
+  12  u16 anim_w, anim_h        zone de l'animation (centrée horizontalement)
+  16  u16 nframes, 0            nombre d'images de l'animation
   20  i16 logo_top              haut du logo, par rapport au centre de l'écran
   22  i16 word_top, word_ox     haut et décalage gauche de l'image du nom
   26  u16 word_tw               largeur du texte (pour le centrer)
-  28  i16 spin_y, u16 spin_box  centre du cercle (par rapport au centre) et demi-taille de sa zone
+  28  i16 anim_top, 0           haut de la zone de l'animation, par rapport au centre
   32  u32 bg_top, bg_bottom     couleurs du dégradé (0x00RRGGBB)
-  40  u32 off_logo, off_word, off_dot, off_frames
-  56  données ; images : nframes x ndots x (i8 dx, i8 dy) = coin du point par rapport au centre
+  40  u32 off_logo, off_word, off_anim, anim_col
+  56  données ; animation : nframes images de couverture 8 bits (anim_w x anim_h), couleur anim_col
 """
 import math
 import struct
 
 # mêmes valeurs que src/core/wm.c
-LOGO_TOP, LOGO_SIZE, WORD_TOP, SPIN_Y, SPIN_R, DOT_R = -150, 110, -22, 100, 18, 3.2
+LOGO_TOP, LOGO_SIZE, WORD_TOP = -150, 110, -22
+ANIM_TOP, ANIM_W, ANIM_H, ANIM_COL = 82, 128, 32, 0xE0F2FE
+PEAKS = (12, 17, 22, 17, 12)    # hauteur des cinq sommets
+PEAK_GAP, PEAK_LIFT, PEAK_BASE = 24, 6, 30
 BG_TOP, BG_BOTTOM = 0x070B18, 0x161237
 FPS = 18.2                      # le compteur du BIOS avance 18,2 fois par seconde
-NFRAMES = 36                    # un tour complet de l'animation dure 36 tops (2 s)
+NFRAMES = 36                    # un cycle complet de l'animation dure 36 tops (2 s)
+PERIOD = NFRAMES / FPS
 
 
 def mix(a, b, t):
@@ -123,52 +127,58 @@ def word_sprite(ttc, text="TitanOs", face_name="Inter Display SemiBold", px=36):
     return W, H, bytes(img), x0, y0, tw
 
 
-def dot_sprite(r):
-    n = int(math.ceil(r)) * 2 + 2
-    c = n / 2
-    img = bytearray(n * n)
-    for j in range(n):
-        for i in range(n):
-            d = math.hypot(i + 0.5 - c, j + 0.5 - c) - r
-            img[j * n + i] = int(max(0.0, min(1.0, 0.5 - d)) * 255 + 0.5)
-    return n, n, bytes(img)
+def peak_wave(t, i):
+    """Comme draw_peaks (wm.c) : 0 au repos, 1 au plus haut."""
+    p = t / PERIOD - i * 0.12
+    p -= math.floor(p)
+    if p >= 0.5:
+        return 0.0
+    v = math.sin(math.pi * p / 0.5)
+    return v * v
 
 
-def spinner_frames(dot_w):
-    """Même mouvement que draw_spinner (wm.c) : cinq points qui ralentissent en haut."""
-    frames = bytearray()
+def peaks_frames():
+    """Les « crêtes » : cinq petits sommets qui grandissent et s'éclairent tour à tour."""
+    out = bytearray()
     for f in range(NFRAMES):
         t = f / FPS
-        for i in range(5):
-            p = (t - i * 0.11) / 2.0
-            p -= math.floor(p)
-            ang = -math.pi / 2 + 2 * math.pi * (p - math.sin(2 * math.pi * p) / (2 * math.pi))
-            x = math.cos(ang) * SPIN_R - dot_w / 2
-            y = math.sin(ang) * SPIN_R - dot_w / 2
-            frames += struct.pack("<bb", int(round(x)), int(round(y)))
-    return bytes(frames)
+        img = [[0.0] * ANIM_W for _ in range(ANIM_H)]
+        for i, h in enumerate(PEAKS):
+            w = peak_wave(t, i)
+            a = 0.28 + 0.72 * w
+            cx = ANIM_W / 2 + (i - 2) * PEAK_GAP
+            half = h * 0.6
+            top = PEAK_BASE - h - PEAK_LIFT * w
+            pts = [(cx, top), (cx - half, PEAK_BASE), (cx + half, PEAK_BASE)]
+            for y in range(max(0, int(math.floor(top)) - 1), min(ANIM_H, PEAK_BASE + 2)):
+                for x in range(max(0, int(math.floor(cx - half)) - 1), min(ANIM_W, int(cx + half) + 2)):
+                    cov = max(0.0, min(1.0, 0.5 - tri_dist(x + 0.5, y + 0.5, pts)))
+                    img[y][x] = max(img[y][x], cov * a)
+        for row in img:
+            out += bytes(int(v * 255 + 0.5) for v in row)
+    return bytes(out)
 
 
 def build(ttc):
     lw, lh, logo = logo_sprite(LOGO_SIZE)
     ww, wh, word, wox, woy, wtw = word_sprite(ttc)
-    dw, dh, dot = dot_sprite(DOT_R)
-    frames = spinner_frames(dw)
+    frames = peaks_frames()
     off_logo = 56
     off_word = off_logo + len(logo)
-    off_dot = off_word + len(word)
-    off_frames = off_dot + len(dot)
-    hdr = struct.pack("<4sHHHHHHHHhhhHhHIIIIII", b"TBIM", lw, lh, ww, wh, dw, dh, NFRAMES, 5,
-                      LOGO_TOP, WORD_TOP + woy, wox, wtw, SPIN_Y, SPIN_R + dw, BG_TOP, BG_BOTTOM,
-                      off_logo, off_word, off_dot, off_frames)
+    off_anim = off_word + len(word)
+    hdr = struct.pack("<4sHHHHHHHHhhhHhHIIIIII", b"TBIM", lw, lh, ww, wh, ANIM_W, ANIM_H, NFRAMES, 0,
+                      LOGO_TOP, WORD_TOP + woy, wox, wtw, ANIM_TOP, 0, BG_TOP, BG_BOTTOM,
+                      off_logo, off_word, off_anim, ANIM_COL)
     assert len(hdr) == 56
-    return hdr + logo + word + dot + frames
+    img = hdr + logo + word + frames
+    assert 0x20000 + len(img) < 0x90000, "BOOT.IMG trop gros pour le chargeur BIOS"
+    return img
 
 
 def render_preview(img, W, H, frame=0):
     """Ce que dessinent les chargeurs (pour comparer avec l'écran de TitanOs)."""
-    (lw, lh, ww, wh, dw, dh, nf, nd, ltop, wtop, wox, wtw, sy, sbox, bgt, bgb,
-     ol, ow, od, of) = struct.unpack_from("<HHHHHHHHhhhHhHIIIIII", img, 4)
+    (lw, lh, ww, wh, aw, ah, nf, _, ltop, wtop, wox, wtw, atop, _, bgt, bgb,
+     ol, ow, oa, acol) = struct.unpack_from("<HHHHHHHHhhhHhHIIIIII", img, 4)
     out = bytearray(W * H * 3)
     t, b = rgb(bgt), rgb(bgb)
     rows = [mix(t, b, y * 256 // (H - 1)) for y in range(H)]
@@ -190,12 +200,12 @@ def render_preview(img, W, H, frame=0):
             x, y = (W - wtw) // 2 + wox + i, cy + wtop + j
             bg = rows[y]
             put(x, y, tuple(bg[k] + (0xF8 - bg[k]) * a // 255 for k in range(3)))
-    for d in range(nd):
-        dx, dy = struct.unpack_from("<bb", img, of + (frame * nd + d) * 2)
-        for j in range(dh):
-            for i in range(dw):
-                a = img[od + j * dw + i]
-                x, y = cx + dx + i, cy + sy + dy + j
-                bg = rows[y]
-                put(x, y, tuple(bg[k] + (255 - bg[k]) * a // 255 for k in range(3)))
+    fg = rgb(acol)
+    base = oa + frame * aw * ah
+    for j in range(ah):
+        for i in range(aw):
+            a = img[base + j * aw + i]
+            x, y = cx - aw // 2 + i, cy + atop + j
+            bg = rows[y]
+            put(x, y, tuple(bg[k] + (fg[k] - bg[k]) * a // 255 for k in range(3)))
     return bytes(out)
