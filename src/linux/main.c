@@ -290,11 +290,14 @@ static void boot_worker(int out) {
     tell("D\n");
 }
 
-/* ligne de diagnostic affichée en bas de l'écran de verrouillage (bêta) : si l'heure
+/* ligne de diagnostic affichée en bas de l'écran de verrouillage, seulement si la clé,
+ * le clavier ou le pointeur manquent : si l'heure
  * s'y arrête, le bureau est bloqué ; si « événements » reste à 0, le clavier et la
  * souris n'arrivent pas jusqu'à TitanOs */
 static const char *diag_key = "recherche";
 void plat_diag(char *b, int n) {
+    b[0] = 0;
+    if (!strcmp(diag_key, "montée") && input_ok()) return;      /* tout va bien : rien à afficher */
     static char mods[32768];
     int nm = 0, len = read_file("/proc/modules", mods, sizeof mods);
     for (int i = 0; i < len; i++) if (mods[i] == '\n') nm++;
@@ -320,7 +323,7 @@ static void prepare_home(bool on_key, const char *storage) {
     if (first) {
         char p[256];
         snprintf(p, sizeof p, "%s/Bienvenue.txt", home);
-        const char *t = "Bienvenue dans TitanOs (bêta 4) !\n\n"
+        const char *t = "Bienvenue dans TitanOs (bêta 5) !\n\n"
                         "TitanOs tourne sur le noyau Linux : Linux fournit les pilotes (écran, clavier,\n"
                         "USB, Wi-Fi, son...), et tout le reste est écrit pour TitanOs.\n\n"
                         "Vos fichiers sont gardés sur la clé USB, dans le dossier Utilisateur.\n"

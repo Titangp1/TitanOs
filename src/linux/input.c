@@ -260,6 +260,14 @@ static void add_dev(const char *name, int type, void *ctx) {
 void input_scan(void) { for_each_dir("/dev/input", add_dev, NULL); }
 
 int input_events;
+bool input_ok(void) {
+    bool k = false, m = false;
+    for (int i = 0; i < ndevs; i++) {
+        if (devs[i].kind & DEV_KBD) k = true;
+        if (devs[i].kind & (DEV_MOUSE | DEV_ABS | DEV_TOUCHPAD)) m = true;
+    }
+    return k && m;
+}
 void input_describe(char *b, int n) {
     int k = 0, m = 0, t = 0;
     for (int i = 0; i < ndevs; i++) {

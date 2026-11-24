@@ -43,6 +43,9 @@ static char *name_of(const char *path) {
 }
 
 void modules_init(void) {
+    /* une seule fois : la session est une copie de /init, qui a déjà lu les tables.
+     * Les relire ajouterait les entrées au-delà de la place réservée. */
+    if (mods || aliases) return;
     char *dep = load_text(MODDIR "/modules.dep");
     if (dep) {
         int lines = 1;

@@ -1,4 +1,4 @@
-# TitanOs — bêta 4
+# TitanOs — bêta 5
 
 Système d'exploitation **léger** sur base Linux, avec un bureau **liquid glass** écrit en C,
 sans bibliothèque, et pensé pour le **Sony VAIO série F** (Core i7, GeForce GT 330M).
@@ -60,7 +60,7 @@ Raccourcis : touche Windows (menu et recherche), Alt+Tab, Alt+F4, Ctrl+Alt+T (Te
 
 ## Installer sur une clé USB
 
-1. Télécharger `titanos-beta4.img.zip` dans les [versions publiées](../../releases), puis le décompresser.
+1. Télécharger `titanos-beta5.img.zip` dans les [versions publiées](../../releases), puis le décompresser.
 2. Écrire `titanos.img` sur une clé USB avec **Rufus, en mode DD**. Cela efface la clé.
    Prenez une clé d'au moins 2 Go : la place libre accueillera les applications.
 3. **Sony VAIO (BIOS)** : touche F2, onglet Boot, activer **External Device Boot** et mettre la clé
@@ -154,12 +154,19 @@ tools/                téléchargement Alpine, polices, initramfs, image disque,
 
 ## Si quelque chose ne va pas
 
-- **En bas de l'écran de verrouillage**, une ligne de diagnostic indique le nombre de pilotes chargés,
+- **En bas de l'écran de verrouillage**, si la clé, le clavier ou le pointeur manquent, une ligne de diagnostic indique le nombre de pilotes chargés,
   si la clé est montée, les claviers, souris et pavés tactiles trouvés, le nombre d'événements reçus
   (touches, mouvements) et le temps écoulé depuis le démarrage. Si ce temps s'arrête, le bureau est bloqué.
 - **Sur la clé**, dès qu'elle est trouvée, TitanOs écrit `journal-titanos.txt` toutes les 5 secondes
   pendant 4 minutes : messages du noyau, pilotes, périphériques, et l'endroit où chaque processus attend.
   Branchez la clé sur Windows et envoyez ce fichier.
+
+## Nouveautés de la bêta 5
+
+- **Correction de l'écran figé** : la liste des pilotes était lue deux fois, ce qui écrasait la mémoire et
+  faisait planter leur chargement. Sans pilotes, ni la carte NVIDIA, ni la clé, ni le clavier et la souris
+  n'étaient pris en charge par le bureau.
+- La ligne de diagnostic n'apparaît plus que si la clé, le clavier ou le pointeur manquent.
 
 ## Nouveautés de la bêta 4
 
@@ -184,7 +191,7 @@ tools/                téléchargement Alpine, polices, initramfs, image disque,
   - le bureau, les animations et les applications sont rendus et pilotés dans l'aperçu Windows ;
   - le programme Linux et le chargeur UEFI se compilent sans erreur.
 - **Essayé sur le VAIO (bêtas 1 et 2)** : le démarrage et son animation fonctionnent ; l'écran de
-  verrouillage reste figé (souris et clavier sans effet). La bêta 3 a montré que le bureau plante en boucle ; la bêta 4 en donne la cause.
+  verrouillage restait figé. La bêta 4 a donné la cause, corrigée dans la bêta 5.
 - **À tester sur le VAIO** :
   - l'écran de verrouillage et le bureau ;
   - le Wi-Fi, le son, la batterie et les touches Fn ;
