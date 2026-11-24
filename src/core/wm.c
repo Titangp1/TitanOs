@@ -52,7 +52,7 @@ static void draw_shadow(canvas_t *dst, shadow_t *s, rect_t r, float radius, floa
 }
 
 typedef struct { rect_t r; bool ok, shown, leaving; canvas_t cache; int level; uint64_t t0; shadow_t sh; } glass_el_t;
-static glass_el_t g_dock, g_tray, g_menu, g_cal, g_pop, g_toast, g_osd, g_avatar, g_hint;
+static glass_el_t g_power, g_dock, g_tray, g_menu, g_cal, g_pop, g_toast, g_osd, g_avatar, g_hint;
 
 /* transitions plein écran : l'ancienne image (snap) s'efface par-dessus la nouvelle */
 enum { TR_NONE, TR_FADE, TR_UNLOCK };
@@ -202,6 +202,9 @@ static rect_t dock_item_rect(int i) {      /* -1 : bouton TitanOs */
 /* zone de notification : réseau, volume, batterie, clavier, horloge */
 enum { TP_NET, TP_VOL, TP_BAT, TP_KBD, TP_CLOCK, TP_COUNT };
 static rect_t tparts[TP_COUNT];
+/* bouton d'arrêt, en bas à gauche */
+static rect_t power_rect(void) { return R(12, scr_h - DOCK_H - 12, DOCK_H, DOCK_H); }
+
 static rect_t tray_rect(void) {
     static const int widths[TP_COUNT] = { 40, 40, 70, 40, 118 };
     int w = 16;
@@ -787,6 +790,15 @@ static void draw_tooltip(void) {
     text_center(T, &font_body, b, t, C_TEXT);
 }
 
+static void draw_power(void) {
+    rect_t r = power_rect();
+    if (!rect_hits(rect_grow(r, 30), T->clip)) return;
+    draw_glass_ex(&g_power, r, r.w / 2.0f, 0, 24, 0x50000000);
+    bool hov = rect_has(r, mx, my);
+    if (hov) gfx_circle(T, r.x + r.w / 2.0f, r.y + r.h / 2.0f, r.w / 2.0f - 6, 0x30FFFFFF);
+    draw_icon(T, ICON_POWER, r.x + (r.w - 28) / 2, r.y + (r.h - 28) / 2, 28);
+}
+
 static void draw_tray(void) {
     rect_t t = tray_rect();
     if (!rect_hits(rect_grow(t, 20), T->clip)) return;
@@ -1049,13 +1061,15 @@ static void present_rect(rect_t P);
 static void collect_glass(glass_el_t **list, int *n) {
     *n = 0;
     if (mode != MODE_DESK) return;
-    g_dock.level = 100; g_tray.level = 100;
+    g_dock.level = 100; g_tray.level = 100; g_power.level = 100;
+    g_power.r = power_rect();
     g_menu.level = 101; g_cal.level = 101;
     g_pop.level = 102; g_toast.level = 103; g_osd.level = 104;
     g_dock.r = dock_rect();
     g_tray.r = tray_rect();
     list[(*n)++] = &g_dock;
     list[(*n)++] = &g_tray;
+    list[(*n)++] = &g_power;
     glass_el_t *opt[] = { &g_menu, &g_cal, &g_pop, &g_toast, &g_osd };
     rect_t rr[] = { menu_rect(), cal_rect(), pop_rect(), toast_rect(), osd_rect() };
     for (int i = 0; i < countof(opt); i++)
@@ -1108,6 +1122,7 @@ static void compose(void) {
         }
         with_layer(rect_grow(dock_rect(), 40), 1, 0, draw_dock_body);
         draw_tray();
+        draw_power();
         float a;
         if ((a = el_alpha(&g_cal)) > 0) with_layer(rect_grow(cal_rect(), 44), a, (int)((1 - a) * 14), draw_calendar);
         if ((a = el_alpha(&g_menu)) > 0) with_layer(rect_grow(menu_rect(), 50), a, (int)((1 - a) * 22), draw_menu);
@@ -1242,6 +1257,9 @@ static bool near_resize(window_t *w, int x, int y) {
 }
 
 static void update_hover(void) {
+    static bool power_hov;
+    bool ph = mode == MODE_DESK && rect_has(power_rect(), mx, my);
+    if (ph != power_hov) { power_hov = ph; damage(rect_grow(power_rect(), 30), 100); }
     window_t *hw = NULL;
     int hb = HV_NONE;
     window_t *top = (mode == MODE_DESK && !menu_open && !pop_open) ? window_at(mx, my) : NULL;
@@ -1385,6 +1403,7 @@ static void mouse_button(const event_t *e) {
         }
         return;
     }
+    if (rect_has(power_rect(), mx, my)) { sound_play(SFX_CLICK); wm_power(0); return; }
     if (rect_has(tray_rect(), mx, my)) {
         if (tray_hover == TP_CLOCK) toggle_cal();
         else if (tray_hover == TP_KBD) { sound_play(SFX_CLICK); wm_kbd_layout_toggle(); }

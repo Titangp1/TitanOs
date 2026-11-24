@@ -139,11 +139,15 @@ static void block_cb(const char *name, int type, void *ctx) {
     strlcpy(key_dev, name, sizeof key_dev);
 }
 
+static int mount_tries;
 static bool mount_key(void) {
+    mount_tries++;
     key_dev[0] = other_dev[0] = 0;
     for_each_dir("/sys/class/block", block_cb, NULL);
     /* démarrage UEFI (pas de signature transmise) ou signature introuvable : la copie trouvée */
-    if (!key_dev[0] && other_dev[0]) strlcpy(key_dev, other_dev, sizeof key_dev);
+    /* la clé USB peut mettre quelques secondes à apparaître : on ne se rabat sur une autre copie
+     * de TitanOs (le disque interne) qu'après l'avoir attendue */
+    if (!key_dev[0] && other_dev[0] && (!boot_sig()[0] || mount_tries > 32)) strlcpy(key_dev, other_dev, sizeof key_dev);
     if (!key_dev[0]) return false;
     module_load("nls_cp437");
     module_load("nls_utf8");
@@ -360,7 +364,7 @@ static void prepare_home(bool on_key, const char *storage) {
     if (first) {
         char p[256];
         snprintf(p, sizeof p, "%s/Bienvenue.txt", home);
-        const char *t = "Bienvenue dans TitanOs (bêta 12) !\n\n"
+        const char *t = "Bienvenue dans TitanOs (bêta 13) !\n\n"
                         "TitanOs tourne sur le noyau Linux : Linux fournit les pilotes (écran, clavier,\n"
                         "USB, Wi-Fi, son...), et tout le reste est écrit pour TitanOs.\n\n"
                         "Vos fichiers sont gardés sur la clé USB, dans le dossier Utilisateur.\n"

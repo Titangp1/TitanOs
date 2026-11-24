@@ -834,7 +834,7 @@ gdtr:
     .long gdt
 
 m_diskarg: .asciz " titanos.disk="
-m_hello:  .asciz "TitanOs beta 12 - demarrage BIOS\r\n"
+m_hello:  .asciz "TitanOs beta 13 - demarrage BIOS\r\n"
 m_kernel: .asciz "  Noyau Linux "
 m_initrd: .asciz "  Systeme TitanOs "
 m_ok:     .asciz " OK\r\n"
