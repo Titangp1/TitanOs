@@ -12,6 +12,14 @@
 #include <drm/drm.h>
 #include <drm/drm_mode.h>
 #include <linux/fb.h>
+#include <emmintrin.h>
+
+static void copy_row(uint32_t *dst, const uint32_t *src, int n) {
+    int i = 0;
+    while (i < n && ((uintptr_t)(dst + i) & 15)) { dst[i] = src[i]; i++; }
+    for (; i + 4 <= n; i += 4) _mm_stream_si128((__m128i *)(dst + i), _mm_loadu_si128((const __m128i *)(src + i)));
+    for (; i < n; i++) dst[i] = src[i];
+}
 
 static struct {
     int fd;
@@ -25,6 +33,7 @@ static struct {
     /* double tampon */
     bool flip;                  /* bascule synchronisée active */
     bool pending;               /* une bascule attend le prochain rafraîchissement */
+    bool flipped;               /* une image a été envoyée depuis la dernière question */
     int back, misses;
     uint32_t *maps[2], fbs[2], handles[2];
     rect_t last;                /* zone changée à l'image précédente */
@@ -291,6 +300,10 @@ static void wait_flip(void) {
 
 int display_hz(void) { return D.hz; }
 
+/* une image vient-elle d'être envoyée en mode synchronisé ? (la boucle principale enchaîne
+ * alors l'image suivante sans attendre : c'est l'écran qui donne le rythme) */
+bool display_flipped(void) { bool f = D.flipped; D.flipped = false; return f; }
+
 void display_present(const uint32_t *scene, int stride, rect_t r) {
     if (!D.map) return;
     uint64_t t0 = now_us();
@@ -303,7 +316,8 @@ void display_present(const uint32_t *scene, int stride, rect_t r) {
             rect_t u = rect_union(r, D.last);
             uint32_t *dst = D.maps[D.back];
             for (int j = 0; j < u.h; j++)
-                memcpy(dst + (size_t)(u.y + j) * D.pitch + u.x, scene + (size_t)(u.y + j) * stride + u.x, (size_t)u.w * 4);
+                copy_row(dst + (size_t)(u.y + j) * D.pitch + u.x, scene + (size_t)(u.y + j) * stride + u.x, u.w);
+            _mm_sfence();
             struct drm_mode_crtc_page_flip pf = { 0 };
             pf.crtc_id = D.crtc;
             pf.fb_id = D.fbs[D.back];
@@ -311,6 +325,7 @@ void display_present(const uint32_t *scene, int stride, rect_t r) {
             long rr = sys_ioctl(D.fd, DRM_IOCTL_MODE_PAGE_FLIP, &pf);
             if (rr == 0) {
                 D.pending = true;
+                D.flipped = true;
                 D.back ^= 1;
                 D.last = r;
                 display_us += now_us() - t0;

@@ -1,5 +1,6 @@
 /* TitanOs - moteur graphique 2D lissé (formes par champs de distance) */
 #include "gfx.h"
+#include <emmintrin.h>
 
 #define fabsf  __builtin_fabsf
 #define sqrtf  __builtin_sqrtf
@@ -279,6 +280,38 @@ void gfx_shadow(canvas_t *c, float x, float y, float w, float h, float r, float 
 }
 
 /* ---------------- copies ---------------- */
+/* une ligne : d = s + d x (1 - alpha de s), 4 pixels à la fois (SSE2) ; les groupes entièrement
+ * opaques sont simplement copiés, les groupes entièrement transparents sautés */
+static void blend_row(uint32_t *d, const uint32_t *s, int n, uint32_t alpha) {
+    const __m128i zero = _mm_setzero_si128(), k255 = _mm_set1_epi32(255), r128 = _mm_set1_epi16(128);
+    const __m128i ga = _mm_set1_epi16((short)alpha);
+    int i = 0;
+    for (; i + 4 <= n; i += 4) {
+        __m128i sv = _mm_loadu_si128((const __m128i *)(s + i));
+        if (alpha < 255) {                       /* s x alpha (transparence de l'ensemble) */
+            __m128i lo = _mm_mullo_epi16(_mm_unpacklo_epi8(sv, zero), ga), hi = _mm_mullo_epi16(_mm_unpackhi_epi8(sv, zero), ga);
+            lo = _mm_add_epi16(lo, r128); hi = _mm_add_epi16(hi, r128);
+            lo = _mm_srli_epi16(_mm_add_epi16(lo, _mm_srli_epi16(lo, 8)), 8);
+            hi = _mm_srli_epi16(_mm_add_epi16(hi, _mm_srli_epi16(hi, 8)), 8);
+            sv = _mm_packus_epi16(lo, hi);
+        }
+        __m128i a = _mm_srli_epi32(sv, 24);
+        int op = _mm_movemask_epi8(_mm_cmpeq_epi32(a, k255));
+        if (op == 0xFFFF) { _mm_storeu_si128((__m128i *)(d + i), sv); continue; }
+        if (_mm_movemask_epi8(_mm_cmpeq_epi32(a, zero)) == 0xFFFF) continue;
+        __m128i ia = _mm_sub_epi32(k255, a);
+        ia = _mm_or_si128(ia, _mm_slli_epi32(ia, 16));
+        __m128i dv = _mm_loadu_si128((const __m128i *)(d + i));
+        __m128i lo = _mm_mullo_epi16(_mm_unpacklo_epi8(dv, zero), _mm_unpacklo_epi32(ia, ia));
+        __m128i hi = _mm_mullo_epi16(_mm_unpackhi_epi8(dv, zero), _mm_unpackhi_epi32(ia, ia));
+        lo = _mm_add_epi16(lo, r128); hi = _mm_add_epi16(hi, r128);
+        lo = _mm_srli_epi16(_mm_add_epi16(lo, _mm_srli_epi16(lo, 8)), 8);
+        hi = _mm_srli_epi16(_mm_add_epi16(hi, _mm_srli_epi16(hi, 8)), 8);
+        _mm_storeu_si128((__m128i *)(d + i), _mm_adds_epu8(sv, _mm_packus_epi16(lo, hi)));
+    }
+    for (; i < n; i++) d[i] = over(d[i], alpha >= 255 ? s[i] : pm_scale(s[i], alpha));
+}
+
 void gfx_blit_rect(canvas_t *dst, int x, int y, const canvas_t *src, rect_t sr, int alpha) {
     sr = rect_isect(sr, R(0, 0, src->w, src->h));
     rect_t d = rect_isect(R(x, y, sr.w, sr.h), dst->clip);
@@ -286,8 +319,7 @@ void gfx_blit_rect(canvas_t *dst, int x, int y, const canvas_t *src, rect_t sr, 
     for (int j = 0; j < d.h; j++) {
         uint32_t *dp = dst->px + (size_t)(d.y + j) * dst->stride + d.x;
         const uint32_t *sp = src->px + (size_t)(sr.y + d.y - y + j) * src->stride + sr.x + d.x - x;
-        if (alpha >= 255) for (int i = 0; i < d.w; i++) dp[i] = over(dp[i], sp[i]);
-        else for (int i = 0; i < d.w; i++) dp[i] = over(dp[i], pm_scale(sp[i], (uint32_t)alpha));
+        blend_row(dp, sp, d.w, (uint32_t)MIN(alpha, 255));
     }
 }
 
@@ -305,13 +337,15 @@ void gfx_blit_scaled(canvas_t *dst, float x, float y, float w, float h, const ca
         if (sy < sr.y || sy >= sr.y + sr.h) continue;
         const uint32_t *srow = src->px + (size_t)sy * src->stride;
         uint32_t *dp = dst->px + (size_t)j * dst->stride;
+        /* la ligne étirée est d'abord rassemblée, puis mélangée 4 pixels à la fois */
+        static uint32_t row[8192];
         int64_t u = (int64_t)((((float)k.x + 0.5f - x) * (float)sr.w / w) * 65536.0f);
-        for (int i = k.x; i < k.x + k.w; i++, u += step) {
+        int n = MIN(k.w, 8192);
+        for (int i = 0; i < n; i++, u += step) {
             int sx = sr.x + (int)(u >> 16);
-            if (sx < sr.x || sx >= sr.x + sr.w) continue;
-            uint32_t p = srow[sx];
-            dp[i] = over(dp[i], alpha >= 255 ? p : pm_scale(p, (uint32_t)alpha));
+            row[i] = sx < sr.x || sx >= sr.x + sr.w ? 0 : srow[sx];
         }
+        blend_row(dp + k.x, row, n, (uint32_t)MIN(alpha, 255));
     }
 }
 

@@ -14,7 +14,8 @@ bool display_open(void);
 void display_close(void);
 void display_present(const uint32_t *scene, int stride, rect_t r);
 int  display_w(void);
-int  display_hz(void);               /* fréquence de l écran */
+int  display_hz(void);
+bool display_flipped(void);               /* fréquence de l écran */
 int  display_h(void);
 const char *display_driver(void);
 bool display_better_available(void);           /* une vraie carte graphique a pris le relais ? */

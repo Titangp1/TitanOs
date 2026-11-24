@@ -2,6 +2,21 @@
 
 Toutes les versions sont dans les [versions publiées](../../releases). Depuis la bêta 6, TitanOs se met à jour tout seul.
 
+## Bêta 18
+
+**Bureau**
+- Les icônes du bureau se déplacent à la souris. Elles se rangent dans une grille, échangent leur place si la case est prise, et la gardent d'un démarrage à l'autre.
+
+**Navigateur**
+- Chromium, la base libre de Google Chrome, est intégré : icône sur le bureau et dans le dock.
+- Il s'installe tout seul dès la première connexion à Internet : environ 370 Mo à télécharger, 900 Mo dans l'espace des applications.
+- Il s'affiche dans une fenêtre TitanOs grâce à un serveur X en mémoire (Xvfb) et à un petit client X11 écrit pour TitanOs, qui transmet la souris et le clavier (extension XTEST).
+
+**Carte graphique et 60 Hz**
+- La boucle d'affichage attendait 16 ms de trop après chaque image synchronisée : pendant les animations, une synchronisation sur deux était ratée (≈ 30 images par seconde). C'est maintenant l'écran qui donne le rythme.
+- Mélanges de pixels calculés 4 par 4 (SSE2) : l'animation des menus est 3 fois plus rapide, le déplacement d'une fenêtre 5 fois plus rapide.
+- Copie vers la mémoire de la carte sans passer par le cache du processeur.
+
 ## Bêta 17
 
 **Réseau**

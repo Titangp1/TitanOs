@@ -2,7 +2,7 @@
 #include "desk.h"
 
 static const char *const names[APP_COUNT] = {
-    "Fichiers", "Terminal", "Bloc-notes", "Calculatrice", "Paramètres", "Système", "Réseau", "Snake", "À propos", "Mises à jour",
+    "Fichiers", "Terminal", "Bloc-notes", "Calculatrice", "Paramètres", "Système", "Réseau", "Snake", "À propos", "Mises à jour", "Chromium",
 };
 const char *app_name(int icon) { return icon >= 0 && icon < APP_COUNT ? names[icon] : "Fenêtre"; }
 
@@ -18,6 +18,7 @@ void app_open(int icon) {
     case ICON_SNAKE:    app_snake_open(); break;
     case ICON_ABOUT:    app_about_open(); break;
     case ICON_UPDATE:   app_update_open(); break;
+    case ICON_BROWSER:  app_browser_open(); break;
     }
 }
 

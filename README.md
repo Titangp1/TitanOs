@@ -40,6 +40,7 @@ Quelques programmes d'Alpine sont embarqués pour ce qui ne se réinvente pas :
 | **Mises à jour automatiques** | Une fois en ligne, TitanOs cherche une version plus récente ici, la télécharge en HTTPS, vérifie ses sommes SHA-256 et l'installe. Il suffit ensuite de redémarrer. |
 | **Installation** | Depuis la clé, TitanOs se copie sur le disque interne ou sur une autre clé USB, avec vos fichiers. |
 | **Intégration au portable** | Batterie, touches Fn (luminosité, volume), couvercle, bouton d'alimentation, mise en veille, températures, interrupteur Wi-Fi du VAIO. |
+| **Navigateur web** | Chromium, la base libre de Google Chrome, s'installe tout seul dès la première connexion à Internet et s'ouvre dans une fenêtre TitanOs. |
 | **Applications Linux** | `apk add htop` dans le Terminal installe un programme d'Alpine. Il reste installé dans l'espace des applications créé au premier démarrage. |
 
 <table>
@@ -54,6 +55,10 @@ Quelques programmes d'Alpine sont embarqués pour ce qui ne se réinvente pas :
 <tr>
 <td><img src="docs/captures/reseau.png" alt="Réseau"></td>
 <td><img src="docs/captures/mises-a-jour.png" alt="Mises à jour"></td>
+</tr>
+<tr>
+<td><img src="docs/captures/chromium.png" alt="Installation de Chromium"></td>
+<td><img src="docs/captures/systeme.png" alt="Système"></td>
 </tr>
 </table>
 
@@ -72,6 +77,7 @@ Il faut 512 Mo de mémoire au minimum. Une fois TitanOs installé, les nouvelles
 
 | Application | Rôle |
 |---|---|
+| **Chromium** | Navigateur web complet (onglets, favoris, mots de passe), avec la disposition de clavier de TitanOs. |
 | **Fichiers** | Dossiers et fichiers : créer, renommer (F2), dupliquer, supprimer avec confirmation. Les clés USB branchées apparaissent, avec un bouton *Éjecter*. |
 | **Terminal** | Vrai terminal (VT100/xterm, 256 couleurs, historique). `aide` liste les commandes. |
 | **Bloc-notes** | Édition UTF-8, sélection, copier/coller, Ctrl+S / Ctrl+O. Avertit avant de fermer un texte non enregistré. |
@@ -94,7 +100,7 @@ Il faut 512 Mo de mémoire au minimum. Une fois TitanOs installé, les nouvelles
 | Windows+L | Verrouiller la session |
 | Impr. écran | Capture d'écran, enregistrée dans *Images* |
 
-Le bouton rond en bas à gauche propose : mettre en veille, redémarrer ou éteindre.
+Le bouton rond en bas à gauche propose : mettre en veille, redémarrer ou éteindre. Les icônes du bureau se déplacent à la souris : elles se rangent dans une grille et gardent leur place.
 
 ## Matériel
 
@@ -102,7 +108,7 @@ TitanOs est réglé pour le **Sony VAIO série F (VPCF11)**.
 
 | Composant | Prise en charge |
 |---|---|
-| Écran | Carte NVIDIA GeForce GT 330M avec le pilote `nouveau` : 1920×1080 à 60 Hz, double tampon synchronisé. Au démarrage, le chargeur utilise des images dessinées pour le mode 1280×1024 du BIOS, aux bonnes proportions. |
+| Écran | Carte NVIDIA GeForce GT 330M (puce GT216) avec le pilote libre `nouveau` : 1920×1080 à 60 Hz, double tampon. Chaque image est envoyée à la carte au rafraîchissement de l'écran, puis la suivante est préparée aussitôt. Les mélanges sont calculés 4 pixels à la fois (SSE2), et la copie vers la mémoire vidéo contourne le cache. Au démarrage, le chargeur utilise des images dessinées pour le mode 1280×1024 du BIOS, aux bonnes proportions. |
 | Wi-Fi | Intel Centrino Advanced-N 6200 (`iwlwifi`, micrologiciel officiel d'Intel) ou Atheros AR9287 (`ath9k`). L'interrupteur WIRELESS est détecté et expliqué. |
 | Câble | Marvell Yukon (`sky2`), avec une adresse automatique dès le branchement. |
 | Son | HD Audio (Realtek ALC275), volume réglable aux touches Fn. |
@@ -119,7 +125,8 @@ Branchez la clé sur un autre ordinateur pour lire ces fichiers.
 
 ## Limites actuelles
 
-- **Pas d'applications graphiques Linux** (Chrome, Firefox, VLC…). Elles ont besoin d'un serveur d'affichage (X11 ou Wayland) et d'une pile graphique (Mesa) que TitanOs n'a pas encore. Seuls les programmes du Terminal fonctionnent.
+- **Chromium**, mais pas Google Chrome : Google ne publie pas Chrome pour ce type de système (Linux avec musl). Chromium tourne dans un serveur X en mémoire (Xvfb), dessiné par le processeur : la navigation est fluide, mais les vidéos lourdes le sont moins. Il prend 900 Mo dans l'espace des applications.
+- Les autres applications graphiques Linux ne sont pas encore intégrées : le pont X11 de Chromium pourra être étendu à d'autres programmes.
 - Le dessin se fait au processeur : la carte graphique sert à l'affichage et à la synchronisation, pas à la 3D.
 - Les mises à jour sont vérifiées par HTTPS et SHA-256, pas encore par une signature.
 
@@ -179,12 +186,12 @@ boot/                 MBR, chargeur BIOS (stage2.S), chargeur UEFI (efiboot.c)
 src/core/             le bureau, indépendant du système
   gfx.c glass.c icons.c png.c     dessin lissé, verre, logo et icônes, images PNG
   wm.c ui.c sound.c                fenêtres, dock, animations, widgets, sons
-  apps.c term.c files.c notes.c prefs.c sysapp.c netapp.c updapp.c imgview.c   applications
+  apps.c term.c files.c notes.c prefs.c sysapp.c netapp.c updapp.c imgview.c browser.c   applications
 src/linux/            ce qui parle au noyau (appels système directs, sans libc)
   main.c                           /init, démarrage, clé, zram, espace des applications
   modules.c display.c input.c      pilotes, écran DRM/KMS (double tampon), clavier, souris, pavé tactile
   audio.c wifi.c plat.c            son ALSA, Wi-Fi (wpa_supplicant), fichiers, système, batterie, horloge
-  update.c volumes.c               mises à jour et installation, clés USB
+  update.c volumes.c xbridge.c     mises à jour et installation, clés USB, serveur X de Chromium
 src/sim/sim.c         version Windows du bureau, pour l'aperçu
 rootfs/etc/           profil du shell, script DHCP, dépôts apk
 tools/                téléchargement Alpine, polices, initramfs, image disque, écran de démarrage, tests

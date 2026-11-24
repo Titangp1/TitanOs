@@ -187,6 +187,8 @@ static void defaults(void) {
     g_set.brightness = -1;
     g_set.glass = 1;
     g_set.pointer = 3;
+    memset(g_set.desk_col, -1, sizeof g_set.desk_col);
+    memset(g_set.desk_row, -1, sizeof g_set.desk_row);
 }
 
 void settings_load(void) {
@@ -217,6 +219,17 @@ void settings_load(void) {
             else if (!strcmp(k, "volume")) g_set.volume = CLAMP(n, 0, 100);
             else if (!strcmp(k, "pointeur")) g_set.pointer = CLAMP(n, 1, 5);
             else if (!strcmp(k, "mot_de_passe")) strlcpy(g_set.pass, v, sizeof g_set.pass);
+            else if (!strcmp(k, "icones")) {               /* « icône:colonne:ligne,... » */
+                for (const char *q = v; *q;) {
+                    int ic = atoi(q), col = -1, row = -1;
+                    const char *c1 = strchr(q, ':');
+                    if (c1) { col = atoi(c1 + 1); const char *c2 = strchr(c1 + 1, ':'); if (c2) row = atoi(c2 + 1); }
+                    if (ic >= 0 && ic < 32 && col >= 0 && row >= 0 && col < 100 && row < 100) { g_set.desk_col[ic] = (signed char)col; g_set.desk_row[ic] = (signed char)row; }
+                    const char *nx = strchr(q, ',');
+                    if (!nx) break;
+                    q = nx + 1;
+                }
+            }
         }
         p = nl + 1;
     }
@@ -341,11 +354,15 @@ bool settings_pass_check(const char *pw) {
 }
 
 void settings_save(void) {
-    char buf[700];
+    char buf[1200];
     int n = snprintf(buf, sizeof buf,
                      "# Réglages de TitanOs\nfond=%d\naccent=%d\nutilisateur=%s\nsecondes=%d\nclavier=%s\n"
                      "fuseau=%d\nhorloge_locale=%d\nluminosite=%d\nverre=%d\nsons=%d\nvolume=%d\npointeur=%d\nmot_de_passe=%s\n",
                      g_set.wallpaper, g_set.accent, g_set.user, g_set.seconds, g_set.layout ? "us" : "fr",
                      g_set.tz, g_set.rtc_local, g_set.brightness, g_set.glass, g_set.sounds, g_set.volume, g_set.pointer, g_set.pass);
+    n += snprintf(buf + n, sizeof buf - (size_t)n, "icones=");
+    for (int i = 0; i < 32; i++)
+        if (g_set.desk_col[i] >= 0) n += snprintf(buf + n, sizeof buf - (size_t)n, "%d:%d:%d,", i, g_set.desk_col[i], g_set.desk_row[i]);
+    n += snprintf(buf + n, sizeof buf - (size_t)n, "\n");
     plat_writefile(plat_config_path(), buf, (size_t)n);
 }

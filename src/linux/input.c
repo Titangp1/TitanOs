@@ -135,7 +135,10 @@ static void key_event(int code, int value) {
         if (down) mods |= MOD_SUPER; else mods &= ~MOD_SUPER;
         break;
     }
-    if (bit) { if (down) mods |= bit; else mods &= ~bit; return; }
+    if (bit) { if (down) mods |= bit; else mods &= ~bit; }
+    /* touche brute pour la fenêtre qui la veut (les répétitions sont faites par le serveur X) */
+    if (value == 2 ? core_raw_key_wanted() : core_raw_key(code, down, mods)) return;
+    if (bit) return;
     if (code == KEY_CAPSLOCK) { if (value == 1) caps = !caps; return; }
 
     if ((mods & MOD_SUPER) && code != KEY_LEFTMETA && code != KEY_RIGHTMETA) super_used = true;

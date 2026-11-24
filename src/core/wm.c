@@ -161,8 +161,40 @@ static glass_t style_for(int kind) {
 }
 
 /* ---------------- géométrie du bureau ---------------- */
-static const int pinned[] = { ICON_FILES, ICON_TERMINAL, ICON_NOTES, ICON_CALC, ICON_SETTINGS, ICON_SYSTEM };
-static const int desk_icons[] = { ICON_FILES, ICON_TERMINAL, ICON_NOTES, ICON_SETTINGS, ICON_SYSTEM, ICON_ABOUT };
+static const int pinned[] = { ICON_FILES, ICON_BROWSER, ICON_TERMINAL, ICON_NOTES, ICON_CALC, ICON_SETTINGS, ICON_SYSTEM };
+static const int desk_icons[] = { ICON_FILES, ICON_BROWSER, ICON_TERMINAL, ICON_NOTES, ICON_SETTINGS, ICON_SYSTEM, ICON_ABOUT };
+
+/* glisser une icône du bureau */
+static int desk_drag = -1;                 /* icône tenue (bouton enfoncé) */
+static bool desk_dragging;                 /* elle a vraiment bougé */
+static int desk_drag_dx, desk_drag_dy, desk_drag_x0, desk_drag_y0;
+
+static int desk_rows(void);
+static int desk_cols(void);
+static rect_t ghost_last, target_last;     /* zones à redessiner pendant le glissement */
+static void desk_cell(int i, int *col, int *row) {
+    int ic = desk_icons[i], rows = desk_rows(), cols = desk_cols();
+    if (g_set.desk_col[ic] >= 0 && g_set.desk_col[ic] < cols && g_set.desk_row[ic] < rows) {
+        *col = g_set.desk_col[ic];
+        *row = g_set.desk_row[ic];
+        return;
+    }
+    /* place par défaut : la n-ième case libre, colonne par colonne */
+    int k = 0;
+    for (int j = 0; j < i; j++) if (g_set.desk_col[desk_icons[j]] < 0) k++;
+    for (int cell = 0; cell < rows * cols; cell++) {
+        int c = cell / rows, r = cell % rows;
+        bool taken = false;
+        for (int j = 0; j < countof(desk_icons); j++) {
+            int o = desk_icons[j];
+            if (g_set.desk_col[o] == c && g_set.desk_row[o] == r) taken = true;
+        }
+        if (taken) continue;
+        if (k-- == 0) { *col = c; *row = r; return; }
+    }
+    *col = 0;
+    *row = 0;
+}
 #define DOCK_H   64
 #define DOCK_IC  44
 #define DOCK_GAP 10
@@ -225,9 +257,18 @@ static rect_t tray_rect(void) {
 static rect_t menu_rect(void) { int w = 600, h = 470; return R((scr_w - w) / 2, scr_h - DOCK_H - 24 - h, w, h); }
 static rect_t cal_rect(void) { rect_t t = tray_rect(); return R(scr_w - 12 - 320, t.y - 12 - 356, 320, 356); }
 static rect_t osd_rect(void) { return R((scr_w - 300) / 2, scr_h - DOCK_H - 12 - 76, 300, 56); }
+/* icônes du bureau : grille de cases de 100 x 104. Une icône déplacée garde sa case ;
+ * les autres se rangent en colonnes dans les cases restées libres. */
+#define CELL_W 100
+#define CELL_H 104
+static int desk_rows(void) { return MAX(1, (scr_h - DOCK_H - 60) / CELL_H); }
+static int desk_cols(void) { return MAX(1, (scr_w - 40) / CELL_W); }
+static void desk_cell(int i, int *col, int *row);
+static rect_t cell_rect(int col, int row) { return R(20 + col * CELL_W, 20 + row * CELL_H, 92, 96); }
 static rect_t desk_icon_rect(int i) {
-    int per_col = MAX(1, (scr_h - DOCK_H - 60) / 104);
-    return R(20 + (i / per_col) * 100, 20 + (i % per_col) * 104, 92, 96);
+    int c, r;
+    desk_cell(i, &c, &r);
+    return cell_rect(c, r);
 }
 static rect_t pop_rect(void) {
     int w = 200;
@@ -357,6 +398,24 @@ static void focus_next(void) {
 }
 
 /* fermeture demandée par l'utilisateur : la fenêtre peut d'abord demander confirmation */
+void wm_damage_client(window_t *w) { if (alive(w)) damage(wm_client(w), win_level(w)); }
+
+/* touches brutes pour une fenêtre qui les veut (Chromium) ; les raccourcis de TitanOs
+ * (touche Windows, Alt+Tab, Alt+F4) et les touches Fn restent à TitanOs */
+bool core_raw_key_wanted(void) {
+    return mode == MODE_DESK && !menu_open && !pop_open && alive(focused) && focused->raw_key && !focused->minimized;
+}
+
+bool core_raw_key(int code, bool down, int m) {
+    if (mode != MODE_DESK || menu_open || pop_open || !alive(focused) || !focused->raw_key || focused->minimized) return false;
+    if (code == 125 || code == 126 || (m & MOD_SUPER)) return false;                     /* touche Windows */
+    if ((m & MOD_ALT) && (code == 15 || code == 62)) return false;                       /* Alt+Tab, Alt+F4 */
+    if (code == 113 || code == 114 || code == 115 || code == 116 || code == 224 || code == 225 || code == 99) return false;
+    now = plat_ms();
+    focused->raw_key(focused, code, down);
+    return true;
+}
+
 void wm_request_close(window_t *w) {
     if (!alive(w)) return;
     if (w->can_close && !w->can_close(w)) return;
@@ -707,23 +766,44 @@ static void draw_wallpaper(void) {
     gfx_copy(T, T->clip.x, T->clip.y, &wall, T->clip);
 }
 
-static void label_shadow(const font_t *f, int x, int y, const char *s, uint32_t col) {
-    text_draw(T, f, x, y + 1, s, 0x99000000);
-    text_draw(T, f, x, y, s, col);
+static void desk_target(int *col, int *row) {
+    *col = CLAMP((mx - desk_drag_dx + 46 - 20) / CELL_W, 0, desk_cols() - 1);
+    *row = CLAMP((my - desk_drag_dy + 48 - 20) / CELL_H, 0, desk_rows() - 1);
+}
+
+static void draw_desk_icon(rect_t r, int i, int alpha) {
+    uint32_t a = (uint32_t)alpha << 24;
+    draw_icon(T, desk_icons[i], r.x + (r.w - 56) / 2, r.y + 8, 56);
+    const char *n = app_name(desk_icons[i]);
+    int x = r.x + (r.w - text_width(&font_body, n)) / 2;
+    text_draw(T, &font_body, x, r.y + 71, n, (uint32_t)(alpha * 0x99 / 255) << 24);
+    text_draw(T, &font_body, x, r.y + 70, n, a | (C_TEXT & 0xFFFFFF));
 }
 
 static void draw_desktop(void) {
     draw_wallpaper();
+    if (desk_dragging) {
+        int c, r;
+        desk_target(&c, &r);
+        rect_t t = cell_rect(c, r);
+        gfx_rrect(T, t.x, t.y, t.w, t.h, 14, 0x22FFFFFF);
+        gfx_rrect_stroke(T, t.x, t.y, t.w, t.h, 14, 1.5f, (accent() & 0xFFFFFF) | 0xC0000000);
+    }
     for (int i = 0; i < countof(desk_icons); i++) {
         rect_t r = desk_icon_rect(i);
+        if (desk_dragging && i == desk_drag) continue;
         if (!rect_hits(r, T->clip)) continue;
         if (i == desk_sel) {
             gfx_rrect(T, r.x, r.y, r.w, r.h, 14, 0x30FFFFFF);
             gfx_rrect_stroke(T, r.x, r.y, r.w, r.h, 14, 1, 0x40FFFFFF);
         }
-        draw_icon(T, desk_icons[i], r.x + (r.w - 56) / 2, r.y + 8, 56);
-        const char *n = app_name(desk_icons[i]);
-        label_shadow(&font_body, r.x + (r.w - text_width(&font_body, n)) / 2, r.y + 70, n, C_TEXT);
+        draw_desk_icon(r, i, 255);
+    }
+    if (desk_dragging) {
+        rect_t r = R(mx - desk_drag_dx, my - desk_drag_dy, 92, 96);
+        if (rect_hits(r, T->clip)) {
+            draw_desk_icon(r, desk_drag, 255);
+        }
     }
 }
 
@@ -1442,7 +1522,16 @@ static void click_desktop(int x, int y, int button, bool dbl) {
         desk_sel = hit;
         if (hit >= 0) damage(desk_icon_rect(hit), 0);
     }
-    if (button == BTN_LEFT && dbl && hit >= 0) app_open(desk_icons[hit]);
+    if (button == BTN_LEFT && dbl && hit >= 0) { app_open(desk_icons[hit]); return; }
+    if (button == BTN_LEFT && hit >= 0) {
+        rect_t r = desk_icon_rect(hit);
+        desk_drag = hit;
+        desk_dragging = false;
+        desk_drag_dx = x - r.x;
+        desk_drag_dy = y - r.y;
+        desk_drag_x0 = x;
+        desk_drag_y0 = y;
+    }
     if (button == BTN_RIGHT) {
         static const char *items[] = { "Ouvrir le Terminal", "Ouvrir les Fichiers", "-", "Fond d'écran suivant", "Paramètres…" };
         wm_menu(x, y, items, countof(items), desk_menu_cb, NULL);
@@ -1479,6 +1568,36 @@ static void mouse_button(const event_t *e) {
     if (mode != MODE_DESK) return;
 
     if (!e->down) {
+        if (desk_drag >= 0) {
+            if (desk_dragging) {
+                int c, r, oc, orow;
+                desk_target(&c, &r);
+                desk_cell(desk_drag, &oc, &orow);
+                for (int j = 0; j < countof(desk_icons); j++) {     /* la case est prise : échange */
+                    int jc, jr;
+                    desk_cell(j, &jc, &jr);
+                    if (j != desk_drag && jc == c && jr == r) {
+                        g_set.desk_col[desk_icons[j]] = (signed char)oc;
+                        g_set.desk_row[desk_icons[j]] = (signed char)orow;
+                    }
+                }
+                /* les icônes sans case choisie gardent leur place actuelle */
+                for (int j = 0; j < countof(desk_icons); j++) {
+                    if (j == desk_drag || g_set.desk_col[desk_icons[j]] >= 0) continue;
+                    int jc, jr;
+                    desk_cell(j, &jc, &jr);
+                    g_set.desk_col[desk_icons[j]] = (signed char)jc;
+                    g_set.desk_row[desk_icons[j]] = (signed char)jr;
+                }
+                g_set.desk_col[desk_icons[desk_drag]] = (signed char)c;
+                g_set.desk_row[desk_icons[desk_drag]] = (signed char)r;
+                settings_save();
+                sound_play(SFX_TICK);
+                damage(R(0, 0, scr_w, scr_h - DOCK_H - 20), 0);
+            }
+            desk_drag = -1;
+            desk_dragging = false;
+        }
         if (drag_kind) { drag_kind = DR_NONE; drag_win = NULL; }
         if (capture) { window_t *c = capture; capture = NULL; dispatch_client(c, e); }
         return;
@@ -1584,6 +1703,19 @@ static void mouse_button(const event_t *e) {
 }
 
 static void motion(void) {
+    if (desk_drag >= 0) {
+        if (!desk_dragging && abs_i(mx - desk_drag_x0) + abs_i(my - desk_drag_y0) > 6) desk_dragging = true;
+        if (desk_dragging) {
+            int c, r;
+            desk_target(&c, &r);
+            rect_t g = rect_grow(R(mx - desk_drag_dx, my - desk_drag_dy, 92, 96), 4), t = rect_grow(cell_rect(c, r), 4);
+            damage(ghost_last, 0); damage(target_last, 0); damage(g, 0); damage(t, 0);
+            damage(rect_grow(desk_icon_rect(desk_drag), 4), 0);
+            ghost_last = g;
+            target_last = t;
+            return;
+        }
+    }
     if (drag_kind == DR_MOVE && alive(drag_win)) {
         int nx = mx - drag_dx, ny = CLAMP(my - drag_dy, 0, scr_h - 60);
         bool had = drag_win->glass_ok;
@@ -1844,6 +1976,12 @@ static void poll_hardware(void) {
     wifi_state = ws;
     wifi_signal = sig;
     time_sync(ws == WIFI_CONNECTED || wired);
+    browser_autoinstall(ws == WIFI_CONNECTED || wired);
+    char bm[160];
+    static int last_br = -1;
+    int br = plat_browser_state(bm, sizeof bm, NULL);
+    if (last_br == BR_INSTALLING && br == BR_READY) wm_toast("Chromium est installé : il est dans le dock.");
+    last_br = br;
     strlcpy(wifi_ssid, ssid, sizeof wifi_ssid);
     net_wired = wired;
     if (changed) damage(rect_grow(tray_rect(), 30), mode == MODE_DESK ? 100 : 0);

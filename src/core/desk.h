@@ -6,12 +6,12 @@
 /* ---------------- icônes (icons.c) ---------------- */
 enum {
     ICON_FILES, ICON_TERMINAL, ICON_NOTES, ICON_CALC, ICON_SETTINGS, ICON_SYSTEM,
-    ICON_NETWORK, ICON_SNAKE, ICON_ABOUT, ICON_UPDATE,        /* les applications */
+    ICON_NETWORK, ICON_SNAKE, ICON_ABOUT, ICON_UPDATE, ICON_BROWSER,   /* les applications */
     ICON_FOLDER, ICON_FILE, ICON_IMAGE, ICON_LOCK, ICON_REBOOT, ICON_POWER,
     ICON_HOME, ICON_USB, ICON_DISK, ICON_SEARCH, ICON_WIFI, ICON_ETHERNET, ICON_VOLUME, ICON_MUTE,
     ICON_BATTERY, ICON_BRIGHTNESS, ICON_COUNT
 };
-#define APP_COUNT 10
+#define APP_COUNT 11
 const char *app_name(int icon);
 void        app_open(int icon);
 void        draw_wifi(canvas_t *c, float cx, float cy, float s, int level, uint32_t col, uint32_t dim);  /* level 0-4 */
@@ -39,6 +39,7 @@ typedef struct {
     int  volume;          /* volume général, 0-100 */
     int  pointer;         /* vitesse du pointeur, 1-5 */
     char pass[64];        /* empreinte du mot de passe de session (vide : aucun) */
+    signed char desk_col[32], desk_row[32];   /* icônes du bureau : case choisie (-1 : par défaut) */
 } settings_t;
 void settings_pass_hash(const char *pw, char out[64]);   /* empreinte d'un mot de passe */
 bool settings_pass_check(const char *pw);                /* le mot de passe correspond-il ? */
@@ -86,6 +87,7 @@ struct window {
     void   (*tick)(window_t *w, uint64_t now);
     void   (*on_close)(window_t *w);
     bool   (*can_close)(window_t *w);  /* false : la fenêtre s'en occupe (demande de confirmation) */
+    void   (*raw_key)(window_t *w, int code, bool down);   /* touches brutes (codes du clavier), au lieu des caractères */
 };
 
 extern int  scr_w, scr_h;
@@ -93,6 +95,9 @@ window_t *wm_open(const char *title, int icon, int w, int h, unsigned flags);
 void      wm_close(window_t *w);
 void      wm_request_close(window_t *w);   /* comme un clic sur ×  (peut demander confirmation) */
 void      wm_invalidate(window_t *w);
+void      wm_damage_client(window_t *w);   /* la surface a été modifiée directement : la réafficher */
+void      browser_autoinstall(bool online);
+#define   DOCK_H_PUBLIC 64
 void      wm_set_title(window_t *w, const char *t);
 void      wm_resize(window_t *w, int client_w, int client_h);
 void      wm_focus(window_t *w);
@@ -156,5 +161,6 @@ void app_network_open(void);
 void app_snake_open(void);
 void app_about_open(void);
 void app_update_open(void);
+void app_browser_open(void);
 void app_image_open(const char *path);
 typedef struct { char name[48]; char path[96]; } volume_t;      /* clé USB ou disque branché */

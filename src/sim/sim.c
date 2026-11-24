@@ -58,7 +58,7 @@ int plat_listdir(const char *path, dirent_t **out) {
     return n;
 }
 int plat_readfile(const char *path, char **data, size_t *len) {
-    const char *t = "Bienvenue dans TitanOs (bêta 17) !\n\nCe Bloc-notes enregistre vos textes sur la clé USB.\n"
+    const char *t = "Bienvenue dans TitanOs (bêta 18) !\n\nCe Bloc-notes enregistre vos textes sur la clé USB.\n"
                     "Le système tourne sur le noyau Linux, mais tout ce que vous voyez est fait maison.\n";
     if (str_ends(path, ".cfg")) return -1;
     *len = strlen(t);
@@ -81,7 +81,7 @@ int plat_pty_read(int id, char *buf, int n) {
     if (pty_sent[id & 7]) return 0;
     pty_sent[id & 7] = true;
     const char *s =
-        "\x1b[1;35mTitanOs bêta 17\x1b[0m - noyau Linux 6.18.65 - BusyBox 1.37\r\n"
+        "\x1b[1;35mTitanOs bêta 18\x1b[0m - noyau Linux 6.18.65 - BusyBox 1.37\r\n"
         "Tapez \x1b[1maide\x1b[0m pour la liste des commandes.\r\n\r\n"
         "\x1b[1;32mtitan\x1b[0m@\x1b[36mtitanos\x1b[0m:\x1b[1;34m~\x1b[0m$ ls\r\n"
         "\x1b[1;34mDocuments\x1b[0m  \x1b[1;34mImages\x1b[0m  \x1b[1;34mMusique\x1b[0m  Bienvenue.txt  vacances.png\r\n"
@@ -253,3 +253,14 @@ int  plat_volumes(void *list, int max) {
 }
 bool plat_eject(const char *path) { (void)path; return true; }
 void plat_random(void *buf, size_t n) { for (size_t i = 0; i < n; i++) ((uint8_t *)buf)[i] = (uint8_t)(i * 37 + 11); }
+int  plat_browser_state(char *msg, int n, int *percent) {
+    if (msg) strlcpy(msg, "Installation de Chromium… 112/249 (libdrm)", (size_t)n);
+    if (percent) *percent = 45;
+    return BR_INSTALLING;
+}
+bool plat_browser_install(void) { return true; }
+bool plat_browser_start(int w, int h) { (void)w; (void)h; return false; }
+bool plat_browser_frame(uint32_t *dst, int stride, int w, int h) { (void)dst; (void)stride; (void)w; (void)h; return false; }
+bool plat_browser_running(void) { return false; }
+void plat_browser_input(int type, int detail, int x, int y) { (void)type; (void)detail; (void)x; (void)y; }
+void plat_browser_stop(void) {}

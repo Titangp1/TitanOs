@@ -25,8 +25,8 @@ typedef __builtin_va_list va_list;
 #define false 0
 #define NULL  ((void *)0)
 
-#define TITANOS_VERSION "Bêta 17"
-#define TITANOS_BUILD   17             /* numéro de version, comparé aux mises à jour publiées */
+#define TITANOS_VERSION "Bêta 18"
+#define TITANOS_BUILD   18             /* numéro de version, comparé aux mises à jour publiées */
 #define countof(a) ((int)(sizeof(a) / sizeof((a)[0])))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -154,7 +154,16 @@ void  plat_suspend(void);                                   /* mise en veille */
 int   plat_volumes(void *list, int max);                  /* volumes branchés (volume_t) */
 bool  plat_eject(const char *path);                       /* démonte un volume */
 void  plat_random(void *buf, size_t n);                    /* octets aléatoires */
-void  plat_rtc_save(void);                                  /* heure système -> horloge du PC (UTC) */
+void  plat_rtc_save(void);
+/* navigateur Chromium (serveur X en mémoire) */
+enum { BR_NONE, BR_INSTALLING, BR_READY, BR_ERROR };
+int   plat_browser_state(char *msg, int n, int *percent);   /* BR_* */
+bool  plat_browser_install(void);
+bool  plat_browser_start(int w, int h);
+bool  plat_browser_frame(uint32_t *dst, int stride, int w, int h);   /* true si l'image a changé */
+bool  plat_browser_running(void);
+void  plat_browser_input(int type, int detail, int x, int y);       /* événement X11 (XTEST) */
+void  plat_browser_stop(void);                                  /* heure système -> horloge du PC (UTC) */
 int   plat_brightness(int set);                             /* set<0 : lecture ; 0-100 ou -1 */
 void  plat_sync(void);
 
@@ -192,4 +201,6 @@ void core_resize(int w, int h);
 void core_splash(const char *step, int percent);           /* texte de l'écran de démarrage */
 void core_start(void);
 void core_event(const event_t *e);
+bool core_raw_key(int code, bool down, int mods);   /* touche brute : true si une fenêtre la prend */
+bool core_raw_key_wanted(void);                     /* la fenêtre active veut-elle les touches brutes ? */
 int  core_frame(void);                                       /* renvoie l'attente conseillée (ms) */
