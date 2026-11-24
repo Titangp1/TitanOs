@@ -254,7 +254,14 @@ static rect_t tray_rect(void) {
     }
     return t;
 }
-static rect_t menu_rect(void) { int w = 600, h = 470; return R((scr_w - w) / 2, scr_h - DOCK_H - 24 - h, w, h); }
+/* menu : 6 applications par ligne ; sa hauteur suit le nombre de lignes (toutes les
+ * applications, même filtrées, pour qu'il ne change pas de taille pendant la recherche) */
+#define MENU_COLS 6
+static rect_t menu_rect(void) {
+    int rows = (APP_COUNT + MENU_COLS - 1) / MENU_COLS;
+    int w = 700, h = MIN(136 + rows * 112 + 100, scr_h - DOCK_H - 48);
+    return R((scr_w - w) / 2, scr_h - DOCK_H - 24 - h, w, h);
+}
 static rect_t cal_rect(void) { rect_t t = tray_rect(); return R(scr_w - 12 - 320, t.y - 12 - 356, 320, 356); }
 static rect_t osd_rect(void) { return R((scr_w - 300) / 2, scr_h - DOCK_H - 12 - 76, 300, 56); }
 /* icônes du bureau : grille de cases de 100 x 104. Une icône déplacée garde sa case ;
@@ -523,6 +530,9 @@ static void set_rect(window_t *w, rect_t r) {
     w->glass_ok = false;
     damage(win_outer(w), win_level(w));
 }
+
+static void toggle_max(window_t *w);
+void wm_maximize(window_t *w) { if (alive(w) && !w->maximized) toggle_max(w); }
 
 void wm_resize(window_t *w, int cw, int ch) {
     if (!alive(w) || w->maximized) return;
@@ -1046,7 +1056,7 @@ static void menu_filter(void) {
 }
 static rect_t menu_app_rect(int k) {
     rect_t m = menu_rect();
-    int cols = 5, cw = (m.w - 48) / cols;
+    int cols = MENU_COLS, cw = (m.w - 48) / cols;
     return R(m.x + 24 + (k % cols) * cw, m.y + 136 + (k / cols) * 112, cw, 104);
 }
 static rect_t menu_power_rect(int i) {   /* 0 verrouiller, 1 redémarrer, 2 éteindre */
@@ -1754,7 +1764,7 @@ static void menu_key(const event_t *e) {
         if (menu_napps) { int a = menu_apps[menu_sel]; close_menu(); app_open(a); }
         return;
     }
-    int cols = 5;
+    int cols = MENU_COLS;
     if (e->key == K_RIGHT) menu_sel = MIN(menu_sel + 1, menu_napps - 1);
     else if (e->key == K_LEFT) menu_sel = MAX(menu_sel - 1, 0);
     else if (e->key == K_DOWN) menu_sel = MIN(menu_sel + cols, menu_napps - 1);

@@ -109,7 +109,9 @@ static void inst_poll(void) {
 
 /* ---------------- serveur X et Chromium ---------------- */
 static int xvfb_pid = -1, chrome_pid = -1, xfd = -1, xtest_op = -1;
-static int scr_w_, scr_h_;
+static int scr_w_, scr_h_;                  /* taille de l'écran X : la plus grande possible */
+static int win_w_, win_h_;                  /* taille demandée pour la fenêtre de Chromium */
+static uint32_t xroot;                      /* fenêtre racine du serveur X */
 static const uint8_t *fb;
 static size_t fb_size;
 static int fb_off, fb_pitch;
@@ -134,6 +136,7 @@ bool plat_browser_start(int w, int h) {
     if (started || !installed()) return started;
     scr_w_ = w;
     scr_h_ = h;
+    if (!win_w_) { win_w_ = w; win_h_ = h; }
     mkdirs(FBDIR);
     mkdirs("/tmp/.X11-unix");
     mkdirs("/run/xdg");
@@ -142,7 +145,7 @@ bool plat_browser_start(int w, int h) {
     sys_unlink(FBDIR "/Xvfb_screen0");
     char geo[32];
     snprintf(geo, sizeof geo, "%dx%dx24", w, h);
-    char *argv[] = { "/usr/bin/Xvfb", ":1", "-screen", "0", geo, "-fbdir", FBDIR, "-nolisten", "tcp", "-ac", "-dpi", "96", NULL };
+    char *argv[] = { "/usr/bin/Xvfb", ":1", "-screen", "0", geo, "-fbdir", FBDIR, "-nolisten", "tcp", "-ac", "-dpi", "96", "-br", NULL };
     xvfb_pid = spawn_env(argv, xenv);
     started = xvfb_pid > 0;
     klog("Chromium : serveur X %dx%d lancé", w, h);
@@ -160,9 +163,20 @@ static bool x_connect(void) {
     if (sys_write(fd, setup, 12) != 12) { sys_close(fd); return false; }
     uint8_t hdr[8];
     if (sys_read(fd, hdr, 8) != 8 || hdr[0] != 1) { sys_close(fd); return false; }
-    size_t more = (size_t)(hdr[6] | hdr[7] << 8) * 4;
-    static uint8_t junk[16384];
-    while (more) { long r = sys_read(fd, junk, MIN(more, sizeof junk)); if (r <= 0) { sys_close(fd); return false; } more -= (size_t)r; }
+    size_t more = (size_t)(hdr[6] | hdr[7] << 8) * 4, got = 0;
+    static uint8_t data[16384];
+    while (got < more) {
+        long r = sys_read(fd, data + MIN(got, sizeof data - 1), MIN(more - got, sizeof data - MIN(got, sizeof data - 1)));
+        if (r <= 0) { sys_close(fd); return false; }
+        got += (size_t)r;
+    }
+    /* fenêtre racine du premier écran : après l'en-tête (32 octets), le nom du fabricant et
+     * les formats de pixels */
+    if (more >= 32) {
+        size_t vlen = data[16] | data[17] << 8, nfmt = data[21];
+        size_t off = 32 + ((vlen + 3) & ~(size_t)3) + 8 * nfmt;
+        if (off + 4 <= more && off + 4 <= sizeof data) xroot = data[off] | data[off + 1] << 8 | (uint32_t)data[off + 2] << 16 | (uint32_t)data[off + 3] << 24;
+    }
     /* QueryExtension("XTEST") */
     uint8_t q[16] = { 98, 0, 4, 0, 5, 0, 0, 0, 'X', 'T', 'E', 'S', 'T', 0, 0, 0 };
     uint8_t rep[32];
@@ -182,6 +196,59 @@ static void x_fake(int type, int detail, int x, int y) {
     r[4] = (uint8_t)type; r[5] = (uint8_t)detail;
     r[24] = (uint8_t)x; r[25] = (uint8_t)(x >> 8); r[26] = (uint8_t)y; r[27] = (uint8_t)(y >> 8);
     sys_write(xfd, r, 36);
+}
+
+/* requête avec réponse : on attend la réponse (au plus 300 ms), en sautant les événements */
+static int x_call(const uint8_t *req, int len, uint8_t *rep, int cap) {
+    if (xfd < 0) return -1;
+    uint8_t junk[256];
+    while (sys_read(xfd, junk, sizeof junk) > 0) {}
+    if (sys_write(xfd, req, (size_t)len) != len) return -1;
+    int got = 0, need = 32;
+    uint64_t end = plat_ms() + 300;
+    while (got < need && plat_ms() < end) {
+        struct pollfd p = { xfd, POLLIN, 0 };
+        if (sys_poll(&p, 1, 50) <= 0) continue;
+        long r = sys_read(xfd, rep + got, (size_t)(MIN(need, cap) - got));
+        if (r <= 0) continue;
+        got += (int)r;
+        if (got >= 32) {
+            if (rep[0] == 0) return -1;                                   /* erreur */
+            if (rep[0] != 1) { memmove(rep, rep + 32, (size_t)(got - 32)); got -= 32; continue; }   /* événement */
+            need = 32 + (int)((uint32_t)rep[4] | (uint32_t)rep[5] << 8 | (uint32_t)rep[6] << 16) * 4;
+            if (need > cap) need = cap;
+        }
+    }
+    return got >= need ? got : -1;
+}
+
+/* fenêtres principales de Chromium redimensionnées (sans gestionnaire de fenêtres X,
+ * c'est TitanOs qui donne la taille) */
+void plat_browser_resize(int w, int h) {
+    w = CLAMP(w, 200, scr_w_);
+    h = CLAMP(h, 150, scr_h_);
+    win_w_ = w;
+    win_h_ = h;
+    if (xfd < 0 || !xroot) return;
+    uint8_t q[8] = { 15, 0, 2, 0, (uint8_t)xroot, (uint8_t)(xroot >> 8), (uint8_t)(xroot >> 16), (uint8_t)(xroot >> 24) };
+    static uint8_t rep[4096];
+    int n = x_call(q, 8, rep, sizeof rep);                                /* QueryTree */
+    if (n < 32) return;
+    int nch = rep[16] | rep[17] << 8;
+    for (int i = 0; i < nch && 32 + i * 4 + 4 <= n; i++) {
+        const uint8_t *c = rep + 32 + i * 4;
+        uint32_t win = c[0] | c[1] << 8 | (uint32_t)c[2] << 16 | (uint32_t)c[3] << 24;
+        uint8_t g[8] = { 14, 0, 2, 0, c[0], c[1], c[2], c[3] }, gr[32];
+        if (x_call(g, 8, gr, sizeof gr) < 32) continue;                   /* GetGeometry */
+        int ww = gr[16] | gr[17] << 8, wh = gr[18] | gr[19] << 8;
+        if (ww < 300 || wh < 200) continue;                               /* menus, bulles : pas touchés */
+        uint8_t cw[28] = { 12, 0, 7, 0 };                                 /* ConfigureWindow x, y, largeur, hauteur */
+        memcpy(cw + 4, &win, 4);
+        cw[8] = 0x0F;
+        uint32_t v[4] = { 0, 0, (uint32_t)w, (uint32_t)h };
+        memcpy(cw + 12, v, 16);
+        sys_write(xfd, cw, 28);
+    }
 }
 
 static uint32_t be32(const uint8_t *p) { return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3]; }
@@ -217,7 +284,7 @@ bool plat_browser_frame(uint32_t *dst, int stride, int w, int h) {
         spawn_env(kb, xenv);
         const char *cp = chromium_path();
         char size[48];
-        snprintf(size, sizeof size, "--window-size=%d,%d", scr_w_, scr_h_);
+        snprintf(size, sizeof size, "--window-size=%d,%d", win_w_, win_h_);
         char *argv[] = { (char *)cp, "--no-sandbox", "--test-type", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
                          "--password-store=basic", "--disable-dev-shm-usage", "--window-position=0,0", size, "--start-maximized",
                          "--lang=fr", "--user-data-dir=/root/.config/chromium", "https://www.google.fr", NULL };
@@ -264,6 +331,8 @@ void plat_browser_stop(void) {
     xfd = -1;
     chrome_pid = xvfb_pid = -1;
     started = false;
+    xroot = 0;
+    win_w_ = win_h_ = 0;
 }
 
 int plat_browser_state(char *msg, int n, int *percent) {

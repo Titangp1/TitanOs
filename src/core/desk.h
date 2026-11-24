@@ -100,6 +100,7 @@ void      browser_autoinstall(bool online);
 #define   DOCK_H_PUBLIC 64
 void      wm_set_title(window_t *w, const char *t);
 void      wm_resize(window_t *w, int client_w, int client_h);
+void      wm_maximize(window_t *w);
 void      wm_focus(window_t *w);
 window_t *wm_focused(void);
 window_t *wm_find(int icon);

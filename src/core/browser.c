@@ -6,7 +6,8 @@ typedef struct {
     bool running;
     int hover;
     uint64_t next;
-    int w, h;                    /* taille de l'écran X (celle de la zone client à l'ouverture) */
+    int w, h;                    /* taille de l'écran X : celle de la fenêtre agrandie */
+    int sent_w, sent_h;          /* dernière taille donnée à Chromium */
 } br_t;
 
 static rect_t install_btn(canvas_t *c) { return R(c->w / 2 - 150, c->h / 2 + 40, 300, 42); }
@@ -80,6 +81,11 @@ static void br_tick(window_t *w, uint64_t now) {
         return;
     }
     b->next = now + 33;                               /* environ 30 images par seconde */
+    if (w->surf.w != b->sent_w || w->surf.h != b->sent_h) {   /* fenêtre agrandie ou redimensionnée */
+        b->sent_w = w->surf.w;
+        b->sent_h = w->surf.h;
+        plat_browser_resize(b->sent_w, b->sent_h);
+    }
     if (!plat_browser_running()) { b->running = false; plat_browser_stop(); wm_close(w); return; }
     if (plat_browser_frame(w->surf.px, w->surf.stride, w->surf.w, w->surf.h)) wm_damage_client(w);
 }
@@ -94,12 +100,16 @@ void app_browser_open(void) {
     if (f) { wm_focus(f); return; }
     br_t *b = calloc(1, sizeof *b);
     if (!b) return;
-    b->w = scr_w - 40;
-    b->h = scr_h - DOCK_H_PUBLIC - 40 - 60 - TITLE_H;
-    window_t *w = wm_open("Chromium", ICON_BROWSER, b->w, b->h, WF_SINGLE);
+    /* l'écran X a la taille de la fenêtre agrandie ; la fenêtre s'ouvre en grand */
+    b->w = scr_w - 16;
+    b->h = scr_h - DOCK_H_PUBLIC - 30 - TITLE_H;
+    window_t *w = wm_open("Chromium", ICON_BROWSER, 1100, 700, WF_SINGLE | WF_RESIZABLE);
     if (!w) { free(b); return; }
-    b->w = w->surf.w;
-    b->h = w->surf.h;
+    w->minw = 480;
+    w->minh = 320;
+    wm_maximize(w);
+    b->sent_w = w->surf.w;
+    b->sent_h = w->surf.h;
     w->data = b;
     w->draw = br_draw;
     w->event = br_event;

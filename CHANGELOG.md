@@ -2,6 +2,11 @@
 
 Toutes les versions sont dans les [versions publiées](../../releases). Depuis la bêta 6, TitanOs se met à jour tout seul.
 
+## Bêta 22
+
+- **Menu Démarrer** : avec Chromium, la 3e ligne d'applications passait sous le nom de l'utilisateur. Le menu affiche maintenant 6 applications par ligne, et sa hauteur suit leur nombre.
+- **Chromium en grand** : la fenêtre s'ouvre agrandie, et elle peut être agrandie, rétablie ou redimensionnée. TitanOs envoie la nouvelle taille au navigateur (requêtes X11 QueryTree, GetGeometry et ConfigureWindow).
+
 ## Bêta 21
 
 **Mise à jour par clé USB**, sans Internet, de deux façons, dans l'application Mises à jour :
