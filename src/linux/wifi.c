@@ -273,17 +273,23 @@ static bool w_connect(const char *ssid, const char *psk) {
     snprintf(cmd, sizeof cmd, "SELECT_NETWORK %d", id);
     bool r = ok(cmd);
     ok("SAVE_CONFIG");
+    klog("Wi-Fi : connexion à « %s » %s", ssid, r ? "demandée" : "refusée");
     sys_sync();
     return r;
 }
 
 static void w_forget(const char *ssid) {
-    int id = net_id(ssid);
-    if (id < 0) return;
-    char cmd[48];
-    snprintf(cmd, sizeof cmd, "REMOVE_NETWORK %d", id);
-    ok(cmd);
+    /* toutes les entrées de ce nom (un réseau peut avoir été ajouté plusieurs fois) */
+    for (int tries = 0; tries < 8; tries++) {
+        int id = net_id(ssid);
+        if (id < 0) break;
+        char cmd[48];
+        snprintf(cmd, sizeof cmd, "REMOVE_NETWORK %d", id);
+        if (!ok(cmd)) break;
+    }
     ok("SAVE_CONFIG");
+    sys_sync();
+    klog("Wi-Fi : réseau « %s » oublié", ssid);
 }
 
 /* ================================================================== */

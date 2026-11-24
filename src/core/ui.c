@@ -198,7 +198,9 @@ typedef struct {
     char label[96];
     char ok[32];
     field_t field;
-    int hover;                     /* 0 annuler, 1 ok */
+    bool password;                 /* champ mot de passe, avec « Afficher » */
+    rect_t eye;                    /* bouton Afficher / Masquer */
+    int hover;                     /* 0 annuler, 1 ok, 2 afficher */
     void (*cb_bool)(bool, void *);
     void (*cb_text)(const char *, void *);
     void *ctx;
@@ -219,7 +221,12 @@ static void dlg_draw(window_t *w, canvas_t *c) {
     if (d->kind == DLG_INPUT) {
         int y = 16 + n * 22 + 6;
         if (d->label[0]) { text_draw(c, &font_small, 24, y, d->label, C_MUTED); y += 20; }
-        ui_field(c, R(24, y, c->w - 48, 40), &d->field, NULL);
+        int fw = c->w - 48 - (d->password ? 112 : 0);
+        ui_field(c, R(24, y, fw, 40), &d->field, NULL);
+        if (d->password) {
+            d->eye = R(24 + fw + 10, y, 102, 40);
+            ui_button(c, d->eye, d->field.secret ? "Afficher" : "Masquer", BTN_NORMAL, d->hover == 2);
+        }
     }
     if (d->kind != DLG_MSG) ui_button(c, dlg_btn(w, 0), "Annuler", BTN_NORMAL, d->hover == 0);
     ui_button(c, dlg_btn(w, 1), d->ok[0] ? d->ok : "OK",
@@ -243,9 +250,11 @@ static void dlg_event(window_t *w, const event_t *e) {
     dlg_t *d = w->data;
     if (e->type == EV_MOTION) {
         int h = rect_has(dlg_btn(w, 1), e->x, e->y) ? 1 : (d->kind != DLG_MSG && rect_has(dlg_btn(w, 0), e->x, e->y)) ? 0 : -1;
+        if (d->password && rect_has(d->eye, e->x, e->y)) h = 2;
         if (h != d->hover) { d->hover = h; wm_invalidate(w); }
     } else if (e->type == EV_BUTTON && e->down && e->button == BTN_LEFT) {
-        if (rect_has(dlg_btn(w, 1), e->x, e->y)) { sound_play(SFX_CLICK); dlg_finish(w, true); }
+        if (d->password && rect_has(d->eye, e->x, e->y)) { sound_play(SFX_CLICK); d->field.secret = !d->field.secret; wm_invalidate(w); }
+        else if (rect_has(dlg_btn(w, 1), e->x, e->y)) { sound_play(SFX_CLICK); dlg_finish(w, true); }
         else if (d->kind != DLG_MSG && rect_has(dlg_btn(w, 0), e->x, e->y)) { sound_play(SFX_CLICK); dlg_finish(w, false); }
     } else if (e->type == EV_KEY && e->down) {
         if (e->key == K_ENTER) dlg_finish(w, true);
@@ -305,6 +314,7 @@ void dlg_password(const char *title, const char *label, void (*cb)(const char *,
     if (w && (w->flags & WF_DIALOG)) {
         dlg_t *d = w->data;
         d->field.secret = true;
+        d->password = true;
         strlcpy(d->ok, "Se connecter", sizeof d->ok);
     }
 }

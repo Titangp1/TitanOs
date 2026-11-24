@@ -14,6 +14,7 @@ typedef struct {
     char job_if[16], result[160];
     uint64_t next_list, next_scan;
     char pending[33];                 /* réseau en attente du mot de passe */
+    char menu_ssid[33];               /* réseau visé par le menu (clic droit) */
 } net_t;
 
 enum { J_NONE, J_DHCP, J_PING };
@@ -141,10 +142,19 @@ static void ctx_cb(int i, void *ctx) {
     window_t *w = ctx;
     if (!w->used || !w->data) return;
     net_t *s = w->data;
-    if (s->hover < 0 || s->hover >= s->nnets) return;
-    wifi_net_t *n = &s->nets[s->hover];
+    /* le pointeur a quitté la liste pour aller dans le menu : on retrouve le réseau par son nom */
+    wifi_net_t *n = NULL;
+    for (int k = 0; k < s->nnets; k++) if (!strcmp(s->nets[k].ssid, s->menu_ssid)) n = &s->nets[k];
+    if (!n) return;
     if (i == 0) choose(w, s, n);
-    else { plat_wifi_forget(n->ssid); wm_toast("Réseau oublié."); s->next_list = 0; }
+    else {
+        plat_wifi_forget(n->ssid);
+        n->known = false;                 /* tout de suite à l'écran, sans attendre le veilleur */
+        if (n->current) { n->current = false; s->wstate = WIFI_OFF; }
+        wm_toast("Réseau oublié : le mot de passe vous sera redemandé.");
+        s->next_list = 0;
+        wm_invalidate(w);
+    }
 }
 
 static void net_event(window_t *w, const event_t *e) {
@@ -171,6 +181,7 @@ static void net_event(window_t *w, const event_t *e) {
     if (s->hover >= 0 && s->hover < s->nnets) {
         if (e->button == BTN_RIGHT) {
             rect_t cl = wm_client(w);
+            strlcpy(s->menu_ssid, s->nets[s->hover].ssid, sizeof s->menu_ssid);
             static const char *items[] = { "Se connecter", "Oublier ce réseau" };
             wm_menu(cl.x + e->x, cl.y + e->y, items, s->nets[s->hover].known ? 2 : 1, ctx_cb, w);
         } else choose(w, s, &s->nets[s->hover]);

@@ -1,4 +1,4 @@
-# TitanOs — bêta 6
+# TitanOs — bêta 7
 
 Système d'exploitation **léger** sur base Linux, avec un bureau **liquid glass** écrit en C,
 sans bibliothèque, et pensé pour le **Sony VAIO série F** (Core i7, GeForce GT 330M).
@@ -71,7 +71,7 @@ Raccourcis : touche Windows (menu et recherche), Alt+Tab, Alt+F4, Ctrl+Alt+T (Te
 
 ## Installer sur une clé USB
 
-1. Télécharger `titanos-beta6.img.zip` dans les [versions publiées](../../releases), puis le décompresser.
+1. Télécharger `titanos-beta7.img.zip` dans les [versions publiées](../../releases), puis le décompresser.
 2. Écrire `titanos.img` sur une clé USB avec **Rufus, en mode DD**. Cela efface la clé.
    Prenez une clé d'au moins 2 Go : la place libre accueillera les applications.
 3. **Sony VAIO (BIOS)** : touche F2, onglet Boot, activer **External Device Boot** et mettre la clé
@@ -172,6 +172,12 @@ tools/                téléchargement Alpine, polices, initramfs, image disque,
 - **Sur la clé**, dès qu'elle est trouvée, TitanOs écrit `journal-titanos.txt` toutes les 5 secondes
   pendant 4 minutes : messages du noyau, pilotes, périphériques, et l'endroit où chaque processus attend.
   Branchez la clé sur Windows et envoyez ce fichier.
+
+## Nouveautés de la bêta 7
+
+- Mot de passe Wi-Fi : bouton **Afficher** pour voir ce qu'on tape.
+- « Oublier ce réseau » fonctionne vraiment (le menu perdait le réseau visé).
+- Le journal note les connexions Wi-Fi demandées et les réseaux oubliés.
 
 ## Nouveautés de la bêta 6
 
