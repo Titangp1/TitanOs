@@ -70,6 +70,7 @@ real_start:
     movl    $BIMG, %esi
     cmpl    $0x4D494254, (%esi)         /* « TBIM » */
     jne     1f
+    call    pick_variant
     call    draw_splash
     movb    $1, gfx
 1:
@@ -477,7 +478,7 @@ grad:
     jmp     2f
 1:  xorl    %eax, %eax
 2:  movl    %eax, %edi
-    movl    $BIMG, %esi
+    movl    bimg_base, %esi
     xorl    %ebx, %ebx                  /* résultat */
     movb    $16, %cl                    /* canaux : décalage 16, 8, 0 */
 3:  movl    32(%esi), %eax              /* couleur du haut */
@@ -637,7 +638,7 @@ draw_splash:
     movl    scr_h, %eax
     movl    %eax, rh
     call    fill_bg
-    movl    $BIMG, %esi                 /* logo */
+    movl    bimg_base, %esi                 /* logo */
     movzwl  4(%esi), %eax
     movl    %eax, rw
     movzwl  6(%esi), %eax
@@ -654,10 +655,10 @@ draw_splash:
     addl    %edx, %eax
     movl    %eax, ry
     movl    40(%esi), %eax
-    addl    $BIMG, %eax
+    addl    bimg_base, %eax
     movl    %eax, %esi
     call    blit_pm
-    movl    $BIMG, %esi                 /* nom « TitanOs » */
+    movl    bimg_base, %esi                 /* nom « TitanOs » */
     movzwl  8(%esi), %eax
     movl    %eax, rw
     movzwl  10(%esi), %eax
@@ -676,7 +677,7 @@ draw_splash:
     movl    %eax, ry
     movl    $0xF8FAFC, fgcol
     movl    44(%esi), %eax
-    addl    $BIMG, %eax
+    addl    bimg_base, %eax
     movl    %eax, %esi
     call    blit_a
     movw    $0xFFFF, cur_frame
@@ -688,7 +689,7 @@ draw_splash:
 spin_update:
     call    unreal                      /* (modifie EAX et BX) */
     movl    0x46C, %eax                 /* tops d'horloge du BIOS */
-    movl    $BIMG, %esi
+    movl    bimg_base, %esi
     movzwl  16(%esi), %ebx              /* nombre d'images */
     xorl    %edx, %edx
     divl    %ebx
@@ -715,7 +716,7 @@ spin_update:
     call    fill_bg                     /* efface l'image précédente */
     /* image courante : off_anim + numéro x largeur x hauteur */
     popl    %eax
-    movl    $BIMG, %esi
+    movl    bimg_base, %esi
     movzwl  12(%esi), %ecx
     imull   %ecx, %eax
     movzwl  14(%esi), %ecx
@@ -723,7 +724,7 @@ spin_update:
     addl    48(%esi), %eax
     movl    52(%esi), %ecx              /* couleur */
     movl    %ecx, fgcol
-    addl    $BIMG, %eax
+    addl    bimg_base, %eax
     movl    %eax, %esi
     call    blit_a
 9:  ret
@@ -757,6 +758,33 @@ add_disk_arg:
     movb    $0, (%di)
     ret
 
+/* Le BIOS ne propose pas toujours la résolution de l'écran (VAIO : 1280x1024 sur un écran
+ * 1920x1080, étiré par l'écran). BOOT.IMG peut contenir une 2e série d'images, dessinée
+ * pour ce mode et cet écran : une fois étirée, elle a les bonnes proportions. */
+pick_variant:
+    movl    $BIMG, %esi
+    movl    %esi, bimg_base
+    movl    56(%esi), %eax              /* position de la variante (0 : aucune) */
+    testl   %eax, %eax
+    jz      9f
+    movzwl  60(%esi), %ecx
+    cmpl    scr_w, %ecx
+    jne     9f
+    movzwl  62(%esi), %ecx
+    cmpl    scr_h, %ecx
+    jne     9f
+    movzwl  64(%esi), %ecx
+    cmpl    native_w, %ecx
+    jne     9f
+    movzwl  66(%esi), %ecx
+    cmpl    native_h, %ecx
+    jne     9f
+    addl    $BIMG, %eax
+    cmpl    $0x4D494254, (%eax)
+    jne     9f
+    movl    %eax, bimg_base
+9:  ret
+
 /* ---------------- données ---------------- */
 drive:      .byte 0x80
 gfx_mode:   .byte 0                     /* mode graphique réglé et dessinable */
@@ -772,6 +800,7 @@ dots:       .word 0
 cur_frame:  .word 0xFFFF
     .balign 4
 best_area:  .long 0
+bimg_base:  .long BIMG
 native_w:   .long 0
 native_h:   .long 0
 cur_lba:    .long 0
@@ -805,7 +834,7 @@ gdtr:
     .long gdt
 
 m_diskarg: .asciz " titanos.disk="
-m_hello:  .asciz "TitanOs beta 11 - demarrage BIOS\r\n"
+m_hello:  .asciz "TitanOs beta 12 - demarrage BIOS\r\n"
 m_kernel: .asciz "  Noyau Linux "
 m_initrd: .asciz "  Systeme TitanOs "
 m_ok:     .asciz " OK\r\n"

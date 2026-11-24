@@ -32,7 +32,10 @@ mu.reg_write(X.UC_X86_REG_ESP, 0x7000)
 text, unknown, vbe_set = [], [], [None]
 # écran simulé : modes VBE proposés et résolution native (EDID).
 # TESTBOOT_VAIO=1 imite la carte NVIDIA du VAIO : pas de mode 1920x1080, mais un 1366x768.
-if os.environ.get("TESTBOOT_VAIO"):
+if os.environ.get("TESTBOOT_VAIO") == "2":       # le vrai VAIO : rien en 16:9, 1280x1024 étiré par l'écran
+    MODES = {0x118: (1024, 768), 0x11B: (1280, 1024)}
+    EXPECT = (1280, 1024)
+elif os.environ.get("TESTBOOT_VAIO"):
     MODES = {0x118: (1024, 768), 0x11B: (1280, 1024), 0x160: (1366, 768), 0x161: (1600, 1200)}
     EXPECT = (1366, 768)
 else:

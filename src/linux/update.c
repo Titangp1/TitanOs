@@ -134,7 +134,7 @@ static bool write_all(int fd, const void *p, long n) {
 
 /* disque qui porte la clé (ou le disque) TitanOs en cours d'utilisation : « sdb » */
 static bool boot_disk(char *disk, int n) {
-    char m[4096];
+    static char m[32768];                       /* les montages overlay ont de longues options */
     if (read_file("/proc/mounts", m, sizeof m) <= 0) return false;
     char *p = strstr(m, " /media/titanos ");
     if (!p) return false;
@@ -157,7 +157,8 @@ static bool boot_disk(char *disk, int n) {
 }
 
 static bool disk_mounted(const char *disk) {
-    char m[4096], pat[32];
+    static char m[32768];
+    char pat[32];
     if (read_file("/proc/mounts", m, sizeof m) <= 0) return false;
     snprintf(pat, sizeof pat, "/dev/%s", disk);
     return strstr(m, pat) != NULL;
@@ -330,7 +331,6 @@ static void disk_cb(const char *name, int type, void *ctx) {
     struct { disk_info_t *list; int max, n; const char *boot; } *c = ctx;
     if (c->n >= c->max) return;
     if (!str_starts(name, "sd") && !str_starts(name, "nvme") && !str_starts(name, "mmcblk") && !str_starts(name, "vd")) return;
-    if (!strcmp(name, c->boot)) return;
     char p[96], v[64];
     snprintf(p, sizeof p, "/sys/block/%s/removable", name);
     bool rem = read_file(p, v, sizeof v) > 0 && v[0] == '1';
@@ -347,6 +347,7 @@ static void disk_cb(const char *name, int type, void *ctx) {
     strlcpy(d->dev, name, sizeof d->dev);
     d->bytes = bytes;
     d->removable = rem;
+    d->current = !strcmp(name, c->boot);
     snprintf(p, sizeof p, "/sys/block/%s/device/model", name);
     if (read_file(p, v, sizeof v) > 0) strlcpy(d->model, trim(v), sizeof d->model);
     if (!d->model[0]) strlcpy(d->model, rem ? "Clé USB" : "Disque interne", sizeof d->model);

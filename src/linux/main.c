@@ -360,7 +360,7 @@ static void prepare_home(bool on_key, const char *storage) {
     if (first) {
         char p[256];
         snprintf(p, sizeof p, "%s/Bienvenue.txt", home);
-        const char *t = "Bienvenue dans TitanOs (bêta 11) !\n\n"
+        const char *t = "Bienvenue dans TitanOs (bêta 12) !\n\n"
                         "TitanOs tourne sur le noyau Linux : Linux fournit les pilotes (écran, clavier,\n"
                         "USB, Wi-Fi, son...), et tout le reste est écrit pour TitanOs.\n\n"
                         "Vos fichiers sont gardés sur la clé USB, dans le dossier Utilisateur.\n"
@@ -432,6 +432,11 @@ static int session_main(void) {
     input_screen_w = display_w();
     input_screen_h = display_h();
     core_init(display_w(), display_h());
+    /* démarrage BIOS sur l'écran provisoire (simpledrm, souvent pas à la bonne résolution) :
+     * l'image du chargeur reste affichée jusqu'au vrai pilote de la carte graphique (8 s max) */
+    bool hold = cmdline_has("titanos.boot=bios") && !strcmp(display_driver(), "simpledrm");
+    uint64_t hold_until = plat_ms() + 8000;
+    core_hold(hold);
     core_splash("Démarrage du noyau Linux…", 0);
 
     /* le travail de démarrage se fait à côté ; ici, les crêtes s'animent */
@@ -457,19 +462,21 @@ static int session_main(void) {
             while ((nl = strchr(buf, '\n'))) {
                 *nl = 0;
                 if (buf[0] == 'S') core_splash(buf + 1, 0);
-                else if (buf[0] == 'G') upgrade_display();
+                else if (buf[0] == 'G') { upgrade_display(); if (strcmp(display_driver(), "simpledrm")) { hold = false; core_hold(false); } }
                 else if (buf[0] == 'K') { on_key = true; strlcpy(storage, buf + 1, sizeof storage); }
                 else if (buf[0] == 'D') done = true;
                 int rest = len - (int)(nl + 1 - buf);
                 memmove(buf, nl + 1, (size_t)rest + 1);
                 len = rest;
             }
+            if (hold && plat_ms() > hold_until) { hold = false; core_hold(false); }
             core_frame();
         }
         sys_close(p[0]);
         if (pid > 0) { int st; sys_wait4(pid, &st, 0); }
     }
     upgrade_display();
+    core_hold(false);
     prepare_home(on_key, storage);
     settings_load();
     if (g_set.brightness >= 0) plat_brightness(g_set.brightness);

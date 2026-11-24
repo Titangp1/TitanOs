@@ -1,4 +1,4 @@
-# TitanOs — bêta 11
+# TitanOs — bêta 12
 
 Système d'exploitation **léger** sur base Linux, avec un bureau **liquid glass** écrit en C,
 sans bibliothèque, et pensé pour le **Sony VAIO série F** (Core i7, GeForce GT 330M).
@@ -71,7 +71,7 @@ Raccourcis : touche Windows (menu et recherche), Alt+Tab, Alt+F4, Ctrl+Alt+T (Te
 
 ## Installer sur une clé USB
 
-1. Télécharger `titanos-beta11.img.zip` dans les [versions publiées](../../releases), puis le décompresser.
+1. Télécharger `titanos-beta12.img.zip` dans les [versions publiées](../../releases), puis le décompresser.
 2. Écrire `titanos.img` sur une clé USB avec **Rufus, en mode DD**. Cela efface la clé.
    Prenez une clé d'au moins 2 Go : la place libre accueillera les applications.
 3. **Sony VAIO (BIOS)** : touche F2, onglet Boot, activer **External Device Boot** et mettre la clé
@@ -172,6 +172,11 @@ tools/                téléchargement Alpine, polices, initramfs, image disque,
 - **Sur la clé**, dès qu'elle est trouvée, TitanOs écrit `journal-titanos.txt` toutes les 5 secondes
   pendant 4 minutes : messages du noyau, pilotes, périphériques, et l'endroit où chaque processus attend.
   Branchez la clé sur Windows et envoyez ce fichier.
+
+## Nouveautés de la bêta 12
+
+- **Écran de démarrage aux bonnes proportions** dès l'allumage : quand le BIOS n'offre pas la résolution de l'écran (VAIO : 1280×1024 étiré sur 1920×1080), le chargeur utilise des images préparées pour ce cas, qui une fois étirées ont exactement la forme et la place de l'écran en 1920×1080. Linux garde ensuite cette image jusqu'au pilote NVIDIA.
+- Installation : tous les disques et clés sont listés, celui qui fait tourner TitanOs est indiqué (correction de la détection du disque de démarrage).
 
 ## Nouveautés de la bêta 11
 

@@ -1062,8 +1062,11 @@ static void collect_glass(glass_el_t **list, int *n) {
         if (opt[i]->shown) { opt[i]->r = rr[i]; list[(*n)++] = opt[i]; }
 }
 
+static bool held;                          /* rien n'est dessiné : l'image du chargeur reste */
+void core_hold(bool h) { if (held && !h) damage_all(); held = h; }
+
 static void compose(void) {
-    if (!ndmg) return;
+    if (!ndmg || held) return;
     rect_t D = R(0, 0, 0, 0);
     const int M = 40;
     if (mode == MODE_DESK) {

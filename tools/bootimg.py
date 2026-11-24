@@ -18,7 +18,9 @@ Format (petit-boutiste) :
   28  i16 anim_top, 0           haut de la zone de l'animation, par rapport au centre
   32  u32 bg_top, bg_bottom     couleurs du dégradé (0x00RRGGBB)
   40  u32 off_logo, off_word, off_anim, anim_col
-  56  données ; animation : nframes images de couverture 8 bits (anim_w x anim_h), couleur anim_col
+  56  u32 off_variant            2e série d'images (BOOT.IMG complet), ou 0
+  60  u16 var_mode_w, var_mode_h, var_native_w, var_native_h : quand l'utiliser
+  68  données ; animation : nframes images de couverture 8 bits (anim_w x anim_h), couleur anim_col
 """
 import math
 import struct
@@ -159,24 +161,72 @@ def peaks_frames():
     return bytes(out)
 
 
+def resample(src, w, h, nw, nh, ch):
+    """Réduction de qualité (moyenne exacte des surfaces) d'une image à ch canaux."""
+    out = bytearray(nw * nh * ch)
+    fx, fy = w / nw, h / nh
+    for y in range(nh):
+        y0, y1 = y * fy, (y + 1) * fy
+        rows = [(j, min(j + 1, y1) - max(j, y0)) for j in range(int(y0), min(h, int(math.ceil(y1))))]
+        for x in range(nw):
+            x0, x1 = x * fx, (x + 1) * fx
+            cols = [(i, min(i + 1, x1) - max(i, x0)) for i in range(int(x0), min(w, int(math.ceil(x1))))]
+            area = 0.0
+            acc = [0.0] * ch
+            for j, wy in rows:
+                for i, wx in cols:
+                    k = (j * w + i) * ch
+                    a = wx * wy
+                    area += a
+                    for c in range(ch):
+                        acc[c] += src[k + c] * a
+            for c in range(ch):
+                out[(y * nw + x) * ch + c] = min(255, int(acc[c] / area + 0.5)) if area else 0
+    return bytes(out)
+
+
+def pack(lw, lh, logo, ww, wh, word, wox, wtw, word_top, logo_top, aw, ah, anim_top, frames, variant=b"", var_key=(0, 0, 0, 0)):
+    off_logo = 68
+    off_word = off_logo + len(logo)
+    off_anim = off_word + len(word)
+    off_var = off_anim + len(frames) if variant else 0
+    hdr = struct.pack("<4sHHHHHHHHhhhHhHIIIIIIIHHHH", b"TBIM", lw, lh, ww, wh, aw, ah, NFRAMES, 0,
+                      logo_top, word_top, wox, wtw, anim_top, 0, BG_TOP, BG_BOTTOM,
+                      off_logo, off_word, off_anim, ANIM_COL, off_var, *var_key)
+    assert len(hdr) == 68
+    return hdr + logo + word + frames + variant
+
+
+# mode proposé par le BIOS et écran réel pour lesquels une variante est préparée (Sony VAIO série F)
+VARIANTS = [((1280, 1024), (1920, 1080))]
+
+
 def build(ttc):
     lw, lh, logo = logo_sprite(LOGO_SIZE)
     ww, wh, word, wox, woy, wtw = word_sprite(ttc)
     frames = peaks_frames()
-    off_logo = 56
-    off_word = off_logo + len(logo)
-    off_anim = off_word + len(word)
-    hdr = struct.pack("<4sHHHHHHHHhhhHhHIIIIII", b"TBIM", lw, lh, ww, wh, ANIM_W, ANIM_H, NFRAMES, 0,
-                      LOGO_TOP, WORD_TOP + woy, wox, wtw, ANIM_TOP, 0, BG_TOP, BG_BOTTOM,
-                      off_logo, off_word, off_anim, ANIM_COL)
-    assert len(hdr) == 56
-    img = hdr + logo + word + frames
+    variant, key = b"", (0, 0, 0, 0)
+    for (mw, mh), (nw, nh) in VARIANTS:
+        sx, sy = mw / nw, mh / nh
+        vlw, vlh = round(lw * sx), round(lh * sy)
+        vww, vwh = round(ww * sx), round(wh * sy)
+        vaw, vah = round(ANIM_W * sx), round(ANIM_H * sy)
+        vframes = b"".join(resample(frames[f * ANIM_W * ANIM_H:(f + 1) * ANIM_W * ANIM_H], ANIM_W, ANIM_H, vaw, vah, 1)
+                           for f in range(NFRAMES))
+        variant = pack(vlw, vlh, resample(logo, lw, lh, vlw, vlh, 4), vww, vwh, resample(word, ww, wh, vww, vwh, 1),
+                       round(wox * sx), round(wtw * sx), round((WORD_TOP + woy) * sy), round(LOGO_TOP * sy),
+                       vaw, vah, round(ANIM_TOP * sy), vframes)
+        key = (mw, mh, nw, nh)
+    img = pack(lw, lh, logo, ww, wh, word, wox, wtw, WORD_TOP + woy, LOGO_TOP, ANIM_W, ANIM_H, ANIM_TOP, frames, variant, key)
     assert 0x20000 + len(img) < 0x90000, "BOOT.IMG trop gros pour le chargeur BIOS"
     return img
 
 
-def render_preview(img, W, H, frame=0):
+def render_preview(img, W, H, frame=0, native=(0, 0)):
     """Ce que dessinent les chargeurs (pour comparer avec l'écran de TitanOs)."""
+    ov, vmw, vmh, vnw, vnh = struct.unpack_from("<IHHHH", img, 56)
+    if ov and (vmw, vmh) == (W, H) and (vnw, vnh) == native:
+        img = img[ov:]
     (lw, lh, ww, wh, aw, ah, nf, _, ltop, wtop, wox, wtw, atop, _, bgt, bgb,
      ol, ow, oa, acol) = struct.unpack_from("<HHHHHHHHhhhHhHIIIIII", img, 4)
     out = bytearray(W * H * 3)

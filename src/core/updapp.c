@@ -46,7 +46,7 @@ static void upd_draw(window_t *w, canvas_t *c) {
     int ipc = -1, ist = plat_install_state(msg, sizeof msg, &ipc);
     text_draw(c, &font_body, 28, 196, "Sur un disque interne ou une clé USB : il est entièrement effacé, puis TitanOs", C_TEXT2);
     text_draw(c, &font_body, 28, 218, "y est copié avec vos fichiers. Branchez la clé avant d'ouvrir cette fenêtre.", C_TEXT2);
-    if (!s->ndisks) text_draw(c, &font_body, 28, 262, "Aucun autre disque ni clé USB trouvé.", C_MUTED);
+    if (!s->ndisks) text_draw(c, &font_body, 28, 262, "Aucun disque ni clé USB trouvé.", C_MUTED);
     for (int i = 0; i < s->ndisks; i++) {
         rect_t r = disk_row(c, i);
         bool sel = i == s->sel;
@@ -57,6 +57,7 @@ static void upd_draw(window_t *w, canvas_t *c) {
         snprintf(line, sizeof line, "%s · %s", s->disks[i].model, sz);
         text_fit(c, &font_bold, r.x + 48, r.y + 13, r.w - 160, line, C_TEXT);
         text_draw(c, &font_small, r.x + r.w - 90, r.y + 15, s->disks[i].dev, C_MUTED);
+        if (s->disks[i].current) text_draw(c, &font_small, r.x + r.w - 300, r.y + 15, "TitanOs en cours", 0xFF86EFAC);
     }
     if (ist == UPD_INSTALLING) {
         text_draw(c, &font_small, 28, c->h - 64, msg, C_TEXT2);
@@ -95,7 +96,10 @@ static void upd_event(window_t *w, const event_t *e) {
     sound_play(SFX_CLICK);
     int ist = plat_install_state(NULL, 0, NULL);
     if (s->hover == H_CHECK) plat_update_check(false);
-    else if (s->hover >= 0) { if (ist != UPD_INSTALLING) s->sel = s->hover; }
+    else if (s->hover >= 0) {
+        if (s->disks[s->hover].current) { wm_toast("TitanOs fonctionne depuis ce disque : choisissez-en un autre."); return; }
+        if (ist != UPD_INSTALLING) s->sel = s->hover;
+    }
     else if (s->hover == H_INSTALL && ist != UPD_INSTALLING && ist != UPD_DONE) {
         if (s->sel < 0) { wm_toast("Choisissez d'abord le disque."); return; }
         disk_info_t *d = &s->disks[s->sel];
@@ -135,7 +139,7 @@ void app_update_open(void) {
     s->sel = -1;
     s->can_install = true;                   /* toujours : vers un disque ou une clé USB */
     s->ndisks = plat_install_disks(s->disks, MAX_DISKS);
-    if (s->ndisks == 1) s->sel = 0;
+    for (int i = 0; i < s->ndisks && s->sel < 0; i++) if (!s->disks[i].current) s->sel = i;
     window_t *w = wm_open("Mises à jour", ICON_UPDATE, 680, 330 + MAX(2, s->ndisks) * 52, WF_SINGLE);
     if (!w) { free(s); return; }
     w->data = s;

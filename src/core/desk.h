@@ -94,6 +94,7 @@ window_t *wm_focused(void);
 window_t *wm_find(int icon);
 rect_t    wm_client(window_t *w);
 void      wm_toast(const char *msg);
+void      core_hold(bool hold);       /* garder l'écran tel quel (démarrage) */
 void      wm_menu(int x, int y, const char *const *items, int n, void (*cb)(int i, void *ctx), void *ctx);
 void      wm_lock(void);
 void      wm_theme_changed(void);
