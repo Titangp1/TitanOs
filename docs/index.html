@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TitanOs — le système qui démarre en beauté</title>
+  <meta name="description" content="TitanOs : un système d'exploitation léger et libre, sur base Debian, avec un bureau en verre liquide écrit en C.">
+  <meta name="theme-color" content="#05060d">
+  <meta property="og:title" content="TitanOs">
+  <meta property="og:description" content="Un système léger et libre, sur base Debian, avec un bureau en verre liquide écrit en C.">
+  <meta property="og:image" content="assets/img/bureau.jpg">
+  <link rel="icon" type="image/svg+xml" href="assets/img/logo.svg">
+  <link rel="preload" href="assets/fonts/inter-var.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="assets/site.css">
+  <script>document.documentElement.classList.add("js")</script>
+  <script src="assets/site.js" defer></script>
+</head>
+<body>
+<div class="progress" aria-hidden="true"><span data-progress></span></div>
+
+<!-- ======================= navigation ======================= -->
+<header class="nav" data-nav>
+  <div class="nav__bar">
+    <a class="nav__brand" href="#haut" aria-label="TitanOs, retour en haut">
+      <img src="assets/img/logo.svg" alt="" width="30" height="25">
+      <span>TitanOs</span>
+    </a>
+    <nav class="nav__links" aria-label="Sections">
+      <a href="#design">Design</a>
+      <a href="#atouts">Atouts</a>
+      <a href="#applications">Applications</a>
+      <a href="#installer">Installer</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <a class="btn btn--light btn--small" href="https://github.com/Titangp1/TitanOs/releases/latest">
+      <span class="btn__arrow" aria-hidden="true">→</span><span>Télécharger</span><span class="btn__arrow" aria-hidden="true">→</span>
+    </a>
+  </div>
+  <div class="nav__anchors" data-anchors>
+    <a class="nav__title" href="#haut">TitanOs</a>
+    <a href="#design">Design</a>
+    <a href="#atouts">Atouts</a>
+    <a href="#fonds">Fonds d'écran</a>
+    <a href="#applications">Applications</a>
+    <a href="#installer">Installer</a>
+    <a href="#faq">FAQ</a>
+    <a class="btn btn--light btn--small" href="https://github.com/Titangp1/TitanOs/releases/latest">
+      <span class="btn__arrow" aria-hidden="true">→</span><span>Télécharger</span><span class="btn__arrow" aria-hidden="true">→</span>
+    </a>
+  </div>
+</header>
+
+<main id="haut">
+
+  <!-- ======================= en-tête ======================= -->
+  <section class="hero dark">
+    <canvas class="hero__wall" data-wall="0" data-live aria-hidden="true"></canvas>
+    <div class="hero__veil" aria-hidden="true"></div>
+    <div class="hero__inner">
+      <h1 class="hero__logo">
+        <img src="assets/img/logo.svg" alt="" width="132" height="110">
+        <span>TitanOs</span>
+      </h1>
+      <p class="hero__tagline">Le système qui démarre en beauté.</p>
+      <div class="peaks" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+    </div>
+    <p class="spinner" aria-label="Plus léger, plus fluide, plus beau que jamais.">
+      <span class="spinner__words" aria-hidden="true" data-spinner>
+        <span>Plus léger</span><span>Plus fluide</span><span>Plus beau</span><span>Plus léger</span>
+      </span>
+      <span class="spinner__suffix" aria-hidden="true">que jamais.</span>
+    </p>
+    <a class="hero__scroll" href="#manifeste" aria-label="Découvrir">
+      <span></span>
+    </a>
+  </section>
+
+  <!-- l'écran grandit avec le défilement -->
+  <section class="scrub dark" data-scrub>
+    <div class="scrub__sticky">
+      <div class="laptop" data-scrub-target>
+        <div class="laptop__screen">
+          <img src="assets/img/bureau.jpg" alt="Le bureau de TitanOs : icônes, dock en verre et barre d'état" width="1920" height="1080">
+        </div>
+        <div class="laptop__base" aria-hidden="true"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- karaoké : les lignes s'allument au défilement -->
+  <section class="karaoke dark" id="manifeste">
+    <div class="container container--narrow">
+      <p>
+        <span class="line" data-line>Un bureau en verre liquide, écrit en C de la première à la dernière ligne.</span>
+        <span class="line" data-line>Un noyau Linux. Une base Debian. Rien d'autre.</span>
+        <span class="line" data-line>Soixante images par seconde, même sur un portable de 2010.</span>
+        <span class="line" data-line>Installé en quelques minutes, à vous pour longtemps.</span>
+      </p>
+      <p><span class="line" data-line>C'est TitanOs.</span></p>
+    </div>
+  </section>
+
+  <!-- ======================= design ======================= -->
+  <section class="giant dark" id="design">
+    <h2 class="giant__word" data-shrink>DESIGN</h2>
+  </section>
+
+  <section class="teaser dark" data-reveal>
+    <img class="teaser__media" src="assets/img/fenetres.jpg" alt="" loading="lazy" width="1920" height="1080">
+    <div class="teaser__content container">
+      <p class="caption">Points forts</p>
+      <h2 class="h2">L'essence<br>du verre.</h2>
+      <p class="lead">Chaque panneau floute et réfracte ce qui se trouve derrière lui, avec un liseré de lumière et un reflet. Et il n'est recalculé que là où c'est utile.</p>
+    </div>
+  </section>
+
+  <section class="teaser teaser--end dark" data-reveal>
+    <img class="teaser__media" src="assets/img/vue-ensemble.jpg" alt="" loading="lazy" width="1920" height="1080">
+    <div class="teaser__content container">
+      <h2 class="h2">Tout, d'un<br>coup d'œil.</h2>
+      <p class="lead">Souris dans le coin en haut à gauche, ou touche F3 : toutes les fenêtres glissent vers une grille. Un clic, et vous y êtes.</p>
+    </div>
+  </section>
+
+  <section class="teaser dark" data-reveal>
+    <img class="teaser__media" src="assets/img/demarrage.jpg" alt="" loading="lazy" width="1920" height="1080">
+    <div class="teaser__content container">
+      <h2 class="h2">Aucune<br>coupure.</h2>
+      <p class="lead">Le logo et ses crêtes s'affichent dès l'allumage, puis Linux reprend exactement la même image. Jamais un texte qui défile, jamais un écran noir.</p>
+    </div>
+  </section>
+
+  <section class="quote dark">
+    <div class="container container--narrow">
+      <h2 class="h2 h2--center">« Moins de choses,<br>mais mieux faites. »</h2>
+      <p class="quote__by">Le principe de TitanOs</p>
+    </div>
+  </section>
+
+  <section class="teaser teaser--end dark" data-reveal>
+    <img class="teaser__media" src="assets/img/menu.jpg" alt="" loading="lazy" width="1920" height="1080">
+    <div class="teaser__content container">
+      <h2 class="h2">Cherchez.<br>Trouvez.</h2>
+      <p class="lead">Le menu Démarrer trouve à la fois les applications et vos fichiers, avec leur emplacement. Entrée, c'est ouvert.</p>
+    </div>
+  </section>
+
+  <!-- masque : le logo s'ouvre sur le bureau -->
+  <section class="mask dark" data-mask>
+    <div class="mask__sticky">
+      <div class="mask__image" data-mask-target>
+        <img src="assets/img/systeme.jpg" alt="" loading="lazy" width="1920" height="1080">
+      </div>
+      <div class="mask__content container" data-mask-content>
+        <h2 class="h2">Un seul programme.<br>Tout le bureau.</h2>
+        <p class="lead">Fenêtres, dock, animations, sons, applications : un seul programme en C, sans bibliothèque, qui parle directement au noyau Linux. Il tient en quelques mégaoctets.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= atouts ======================= -->
+  <section class="intro light" id="atouts">
+    <div class="container">
+      <h2 class="h1">Le résultat ?<br>Limpide.</h2>
+      <p class="lead lead--dark">Un système qui fait peu de bruit, et beaucoup de choses.</p>
+    </div>
+  </section>
+
+  <section class="benefits light">
+    <div class="container">
+      <div class="masonry">
+        <article class="card card--s" data-reveal>
+          <h3 class="h3">Base<br>Debian 13.</h3>
+          <p>apt, NetworkManager, PipeWire et systemd, réduits à l'essentiel.</p>
+        </article>
+        <article class="card card--m" data-reveal>
+          <h3 class="h3">Écrit en C,<br>de bout en bout.</h3>
+          <p>Ni X11, ni Wayland, ni bibliothèque : le bureau parle directement au noyau.</p>
+        </article>
+        <article class="card card--m" data-reveal>
+          <h3 class="h3">BIOS et<br>UEFI.</h3>
+          <p>Il démarre sur un Sony VAIO F comme sur un PC récent.</p>
+        </article>
+        <article class="card card--s" data-reveal>
+          <h3 class="h3">100 %<br>libre.</h3>
+          <p>Licence GPL-3.0 : le code reste ouvert, pour toujours.</p>
+        </article>
+        <article class="card card--s" data-reveal>
+          <h3 class="h3">À jour<br>tout seul.</h3>
+          <p>Les nouvelles versions arrivent en HTTPS, vérifiées par SHA-256.</p>
+        </article>
+        <article class="card card--m" data-reveal>
+          <h3 class="h3">Rien<br>d'imposé.</h3>
+          <p>Aucune application ne s'installe sans vous : <code>apt install</code>, et c'est vous qui décidez.</p>
+        </article>
+        <article class="card card--m" data-reveal>
+          <h3 class="h3">Sûr par<br>défaut.</h3>
+          <p>Le Terminal tourne sans droits d'administrateur ; <code>sudo</code> demande votre mot de passe.</p>
+        </article>
+        <article class="card card--s" data-reveal>
+          <h3 class="h3">Fait pour<br>le portable.</h3>
+          <p>Touches Fn, batterie, couvercle, interrupteur Wi-Fi : tout répond.</p>
+        </article>
+        <article class="card card--m" data-reveal>
+          <h3 class="h3">Douceur<br>du soir.</h3>
+          <p>L'éclairage nocturne réchauffe les couleurs, appliqué par la carte graphique elle-même.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= fonds d'écran ======================= -->
+  <section class="karaoke dark" id="fonds">
+    <div class="container container--narrow">
+      <p class="caption">Fonds d'écran</p>
+      <p>
+        <span class="line" data-line>Six ambiances. Un seul verre.</span>
+        <span class="line" data-line>Chaque fond est calculé en direct, avec des taches de lumière que le verre fait vivre.</span>
+      </p>
+    </div>
+  </section>
+
+  <section class="walls" data-walls>
+    <div class="walls__stage">
+      <canvas class="walls__canvas" data-wall="0" aria-hidden="true"></canvas>
+      <div class="walls__glass" aria-hidden="true">
+        <div class="walls__dock"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
+      <div class="walls__label">
+        <p class="caption">Fond d'écran</p>
+        <p class="walls__name" data-wall-name>Titan</p>
+      </div>
+    </div>
+    <div class="walls__picker" role="tablist" aria-label="Choisir un fond d'écran" data-wall-picker></div>
+    <div class="walls__accents container">
+      <p class="caption">Couleur d'accent</p>
+      <div class="accents" data-accents>
+        <button type="button" style="--c:#6366F1" aria-label="Indigo" class="is-on"></button>
+        <button type="button" style="--c:#3B82F6" aria-label="Bleu"></button>
+        <button type="button" style="--c:#06B6D4" aria-label="Cyan"></button>
+        <button type="button" style="--c:#22C55E" aria-label="Vert"></button>
+        <button type="button" style="--c:#F97316" aria-label="Orange"></button>
+        <button type="button" style="--c:#EC4899" aria-label="Rose"></button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= applications ======================= -->
+  <section class="intro dark" id="applications">
+    <div class="container">
+      <p class="caption">Applications</p>
+      <h2 class="h1">Tout ce qu'il faut.<br>Rien de plus.</h2>
+      <p class="lead">Fichiers, Terminal, Bloc-notes, Calculatrice, Paramètres, Réseau, Mises à jour… Et pour le reste, toute la logithèque de Debian.</p>
+    </div>
+  </section>
+
+  <section class="showcase dark">
+    <details class="show" data-reveal>
+      <summary><span class="show__word">Fichiers</span><span class="show__plus" aria-hidden="true"></span></summary>
+      <div class="show__body">
+        <img src="assets/img/fenetres.jpg" alt="L'application Fichiers" loading="lazy" width="1920" height="1080">
+        <p>Créer, renommer, copier, coller, glisser vers une clé USB. Chaque fichier s'ouvre avec la bonne application ; les archives s'extraient d'un double-clic.</p>
+      </div>
+    </details>
+    <details class="show" data-reveal>
+      <summary><span class="show__word">Terminal</span><span class="show__plus" aria-hidden="true"></span></summary>
+      <div class="show__body">
+        <img src="assets/img/vue-ensemble.jpg" alt="Le Terminal et d'autres fenêtres" loading="lazy" width="1920" height="1080">
+        <p>Un vrai terminal, 256 couleurs, avec bash et toutes les commandes de Debian. <code>apt install</code> demande sudo tout seul ; <code>installer-chrome</code>, <code>installer-discord</code> et <code>installer-vscode</code> installent les paquets officiels.</p>
+      </div>
+    </details>
+    <details class="show" data-reveal>
+      <summary><span class="show__word">Logithèque</span><span class="show__plus" aria-hidden="true"></span></summary>
+      <div class="show__body">
+        <img src="assets/img/logitheque.jpg" alt="La Logithèque" loading="lazy" width="1920" height="1080">
+        <p>LibreOffice, VS Code, Discord, GIMP, Python, Node.js : un clic, une barre de progression, et l'application rejoint le menu Démarrer avec son icône. Uniquement quand vous le demandez.</p>
+      </div>
+    </details>
+    <details class="show" data-reveal>
+      <summary><span class="show__word">Réseau</span><span class="show__plus" aria-hidden="true"></span></summary>
+      <div class="show__body">
+        <img src="assets/img/reseau.jpg" alt="L'application Réseau" loading="lazy" width="1920" height="1080">
+        <p>Wi-Fi WPA2, WPA3 et Entreprise, réseaux masqués, câble, partage de connexion d'un téléphone. Une console montre en direct ce qui se passe, erreurs expliquées en français.</p>
+      </div>
+    </details>
+    <details class="show" data-reveal>
+      <summary><span class="show__word">Paramètres</span><span class="show__plus" aria-hidden="true"></span></summary>
+      <div class="show__body">
+        <img src="assets/img/parametres.jpg" alt="Les Paramètres" loading="lazy" width="1920" height="1080">
+        <p>Fond d'écran, couleur d'accent, éclairage nocturne, clavier, souris, son, date et heure, mot de passe de session. Tout au même endroit.</p>
+      </div>
+    </details>
+  </section>
+
+  <!-- ======================= installation ======================= -->
+  <section class="intro light" id="installer">
+    <div class="container">
+      <p class="caption caption--dark">Installation</p>
+      <h2 class="h1">Une clé.<br>Quelques minutes.</h2>
+      <p class="lead lead--dark">Comme pour Windows : la clé d'installation ouvre un assistant, vous choisissez le disque, TitanOs s'installe. Au premier démarrage, Debian se met en place tout seul.</p>
+    </div>
+  </section>
+
+  <section class="steps light" data-tabs>
+    <div class="container">
+      <div class="tabs" role="tablist" aria-label="Installation ou mise à jour">
+        <button type="button" role="tab" aria-selected="true" data-tab="0">Installer</button>
+        <button type="button" role="tab" aria-selected="false" data-tab="1">Ce qu'il faut</button>
+      </div>
+
+      <div class="tabpanel" data-panel="0">
+        <div class="gallery" data-gallery>
+          <div class="gallery__stage">
+            <figure class="gallery__item is-on">
+              <figcaption><span class="gallery__num">1</span><span class="gallery__label">Écrivez la clé<br>avec Rufus</span></figcaption>
+              <img src="assets/img/installation-1.jpg" alt="Assistant d'installation : bienvenue" loading="lazy" width="1920" height="1080">
+            </figure>
+            <figure class="gallery__item">
+              <figcaption><span class="gallery__num">2</span><span class="gallery__label">Choisissez<br>le disque</span></figcaption>
+              <img src="assets/img/installation-2.jpg" alt="Assistant d'installation : choix du disque" loading="lazy" width="1920" height="1080">
+            </figure>
+            <figure class="gallery__item">
+              <figcaption><span class="gallery__num">3</span><span class="gallery__label">Confirmez,<br>c'est parti</span></figcaption>
+              <img src="assets/img/installation-3.jpg" alt="Assistant d'installation : confirmation" loading="lazy" width="1920" height="1080">
+            </figure>
+            <figure class="gallery__item">
+              <figcaption><span class="gallery__num">4</span><span class="gallery__label">Debian s'installe<br>au démarrage</span></figcaption>
+              <img src="assets/img/demarrage.jpg" alt="Premier démarrage : installation de Debian" loading="lazy" width="1920" height="1080">
+            </figure>
+            <figure class="gallery__item">
+              <figcaption><span class="gallery__num">5</span><span class="gallery__label">Bienvenue<br>chez vous</span></figcaption>
+              <img src="assets/img/verrouillage.jpg" alt="L'écran de verrouillage de TitanOs" loading="lazy" width="1920" height="1080">
+            </figure>
+          </div>
+          <div class="gallery__menu" aria-label="Étapes">
+            <button type="button" class="is-on" aria-label="Étape 1"><img src="assets/img/installation-1.jpg" alt="" loading="lazy"></button>
+            <button type="button" aria-label="Étape 2"><img src="assets/img/installation-2.jpg" alt="" loading="lazy"></button>
+            <button type="button" aria-label="Étape 3"><img src="assets/img/installation-3.jpg" alt="" loading="lazy"></button>
+            <button type="button" aria-label="Étape 4"><img src="assets/img/demarrage.jpg" alt="" loading="lazy"></button>
+            <button type="button" aria-label="Étape 5"><img src="assets/img/verrouillage.jpg" alt="" loading="lazy"></button>
+          </div>
+        </div>
+      </div>
+
+      <div class="tabpanel" data-panel="1" hidden>
+        <ul class="specs">
+          <li><span class="specs__big">64</span><span class="specs__label">bits : un processeur x86-64</span></li>
+          <li><span class="specs__big">1&nbsp;Go</span><span class="specs__label">de mémoire au minimum</span></li>
+          <li><span class="specs__big">16&nbsp;Go</span><span class="specs__label">de disque, qui sera entièrement effacé</span></li>
+          <li><span class="specs__big">1&nbsp;Go</span><span class="specs__label">de clé USB pour l'installation</span></li>
+          <li><span class="specs__big">BIOS</span><span class="specs__label">ou UEFI, Secure Boot désactivé</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= appel à l'action ======================= -->
+  <section class="split">
+    <div class="split__half dark">
+      <div class="split__inner">
+        <p class="caption">Code source</p>
+        <h2 class="h2">Suivre le projet.</h2>
+        <p class="lead">Tout est sur GitHub : chaque version, chaque correction, chaque ligne.</p>
+        <a class="btn btn--line" href="https://github.com/Titangp1/TitanOs">
+          <span class="btn__arrow" aria-hidden="true">→</span><span>Voir sur GitHub</span><span class="btn__arrow" aria-hidden="true">→</span>
+        </a>
+      </div>
+    </div>
+    <div class="split__half brand">
+      <div class="split__inner">
+        <p class="caption">Télécharger</p>
+        <h2 class="h2">Envie d'essayer ?<br>Lancez-vous.</h2>
+        <p class="lead">La clé d'installation de la dernière version, prête pour Rufus.</p>
+        <a class="btn btn--light" href="https://github.com/Titangp1/TitanOs/releases/latest">
+          <span class="btn__arrow" aria-hidden="true">→</span><span>Télécharger TitanOs</span><span class="btn__arrow" aria-hidden="true">→</span>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <section class="downloads light">
+    <div class="container">
+      <h2 class="h2 h2--dark">Notes de version<br>et code source.</h2>
+      <p class="lead lead--dark">Envie d'en savoir plus ? Chaque version est décrite en détail, et le README explique comment tout est construit.</p>
+      <div class="buttons">
+        <a class="btn btn--line-dark" href="https://github.com/Titangp1/TitanOs/blob/main/CHANGELOG.md"><span class="btn__arrow" aria-hidden="true">→</span><span>Historique des versions</span><span class="btn__arrow" aria-hidden="true">→</span></a>
+        <a class="btn btn--line-dark" href="https://github.com/Titangp1/TitanOs#readme"><span class="btn__arrow" aria-hidden="true">→</span><span>Lire le README</span><span class="btn__arrow" aria-hidden="true">→</span></a>
+        <a class="btn btn--dark" href="https://github.com/Titangp1/TitanOs/releases"><span class="btn__arrow" aria-hidden="true">→</span><span>Toutes les versions</span><span class="btn__arrow" aria-hidden="true">→</span></a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= FAQ ======================= -->
+  <section class="faq light" id="faq">
+    <div class="container faq__grid">
+      <div>
+        <p class="caption caption--dark">FAQ</p>
+        <h2 class="h2 h2--dark">Tout est clair.<br>Mais j'ai quand<br>même une question.</h2>
+      </div>
+      <div class="accordion">
+        <details>
+          <summary>TitanOs est-il gratuit ?</summary>
+          <p>Oui, et libre : il est publié sous licence GPL-3.0. Tout le monde peut lire le code, l'utiliser et proposer des améliorations ; une version modifiée doit rester libre.</p>
+        </details>
+        <details>
+          <summary>L'installation efface-t-elle Windows ?</summary>
+          <p>Oui. Le disque choisi est entièrement effacé, Windows et ses fichiers compris : l'assistant le rappelle en rouge avant de commencer. Sauvegardez ce qui compte avant d'installer.</p>
+        </details>
+        <details>
+          <summary>Sur quels ordinateurs fonctionne-t-il ?</summary>
+          <p>Sur les PC 64 bits, en démarrage BIOS ou UEFI (Secure Boot désactivé). Il est pensé pour le Sony VAIO série F, et les pilotes du noyau Linux couvrent la plupart des machines.</p>
+        </details>
+        <details>
+          <summary>Comment installer des applications ?</summary>
+          <p>Dans le Terminal : <code>apt install nom</code> pour tout programme de Debian, <code>installer-chrome</code>, <code>installer-discord</code> ou <code>installer-vscode</code> pour les paquets officiels. La Logithèque fait la même chose à la souris. Rien ne s'installe sans vous.</p>
+        </details>
+        <details>
+          <summary>Où sont rangés mes fichiers ?</summary>
+          <p>Dans le dossier Utilisateur d'une partition FAT32 nommée TITANOS, lisible aussi depuis Windows ou macOS. Seule limite : un fichier ne peut pas dépasser 4 Go.</p>
+        </details>
+        <details>
+          <summary>Comment se font les mises à jour ?</summary>
+          <p>Toutes seules : TitanOs cherche une nouvelle version sur GitHub, la télécharge en HTTPS, vérifie ses sommes SHA-256 et l'installe. Il suffit ensuite de redémarrer. Une clé d'installation plus récente peut aussi mettre à jour un TitanOs déjà installé, en gardant vos fichiers.</p>
+        </details>
+        <details>
+          <summary>Pourquoi une base Debian ?</summary>
+          <p>Pour que les applications « normales » marchent sans effort : Debian apporte apt, des milliers de paquets, et les paquets officiels de Google, Microsoft ou Discord s'installent tels quels. Le bureau, lui, reste entièrement celui de TitanOs.</p>
+        </details>
+        <details>
+          <summary>Et si quelque chose ne marche pas ?</summary>
+          <p>TitanOs écrit un journal à la racine du disque (journal-titanos.txt). Si le bureau ne démarre pas, un mode de secours affiche la cause et TitanOs redémarre sans Debian. Les problèmes se signalent sur GitHub.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- ======================= pied de page ======================= -->
+<footer class="footer dark">
+  <div class="container">
+    <div class="footer__top">
+      <div>
+        <p class="h2">Écrit pour TitanOs.</p>
+        <p class="lead">Chargeurs de démarrage, bureau, applications : tout ce que vous voyez a été construit pièce par pièce, pour être léger, beau et à vous.</p>
+      </div>
+      <nav class="footer__links" aria-label="Pied de page">
+        <div>
+          <p class="footer__head">Découvrir</p>
+          <a href="#design">Design</a><a href="#atouts">Atouts</a><a href="#fonds">Fonds d'écran</a><a href="#applications">Applications</a>
+        </div>
+        <div>
+          <p class="footer__head">Commencer</p>
+          <a href="#installer">Installer</a><a href="#faq">FAQ</a><a href="https://github.com/Titangp1/TitanOs/releases/latest">Télécharger</a>
+        </div>
+        <div>
+          <p class="footer__head">Projet</p>
+          <a href="https://github.com/Titangp1/TitanOs">GitHub</a><a href="https://github.com/Titangp1/TitanOs/blob/main/CHANGELOG.md">Versions</a><a href="https://github.com/Titangp1/TitanOs/blob/main/LICENSE">Licence</a>
+        </div>
+      </nav>
+    </div>
+    <div class="footer__legal">
+      <p>© 2026 Titangp1 · TitanOs est distribué sous licence GPL-3.0 ou ultérieure · Police Inter (SIL OFL 1.1).</p>
+      <p>Linux est une marque de Linus Torvalds ; Debian est une marque de Software in the Public Interest, Inc. Les autres noms cités appartiennent à leurs propriétaires. TitanOs n'est affilié à aucun d'eux.</p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

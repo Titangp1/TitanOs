@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 100" role="img" aria-label="TitanOs">
+  <defs>
+    <linearGradient id="o" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7DD3FC"/>
+      <stop offset="1" stop-color="#6D28D9"/>
+    </linearGradient>
+    <linearGradient id="i" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1E1B4B"/>
+      <stop offset="1" stop-color="#312E81"/>
+    </linearGradient>
+  </defs>
+  <path d="M60 0 L120 100 L0 100 Z" fill="url(#o)"/>
+  <path d="M60 55 L87 100 L33 100 Z" fill="url(#i)"/>
+  <rect x="59" y="16.7" width="2" height="38.3" rx="1" fill="#E0F2FE"/>
+</svg>

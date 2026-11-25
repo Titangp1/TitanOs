@@ -3,6 +3,7 @@
 # TitanOs
 
 <p>
+<a href="https://titangp1.github.io/TitanOs/"><img src="https://img.shields.io/badge/Ouvrir%20le%20site-6d28d9?style=flat-square" alt="Ouvrir le site"></a>
 <a href="https://github.com/Titangp1/TitanOs/releases/latest"><img src="https://img.shields.io/badge/T%C3%A9l%C3%A9charger-1d6fd1?style=flat-square&logo=github&logoColor=white" alt="Télécharger"></a>
 <img src="https://img.shields.io/badge/version-0.34.0--b%C3%AAta-1f2937?style=flat-square" alt="Version 0.34.0 bêta">
 <img src="https://img.shields.io/badge/licence-GPL--3.0-a77d2f?style=flat-square" alt="Licence GPL-3.0">
@@ -14,7 +15,7 @@
 **Un système d'exploitation léger, sur base Debian, avec un bureau *liquid glass* écrit en C.**
 Pensé pour le Sony VAIO série F, il démarre sur n'importe quel PC 64 bits (BIOS ou UEFI).
 
-[**Télécharger la dernière version**](../../releases/latest) · [Historique des versions](CHANGELOG.md) · [Versionnage](#versions) · [Contribuer](CONTRIBUTING.md)
+[**Télécharger la dernière version**](../../releases/latest) · [Le site](https://titangp1.github.io/TitanOs/) · [Historique des versions](CHANGELOG.md) · [Versionnage](#versions) · [Contribuer](CONTRIBUTING.md)
 
 ![Bureau de TitanOs](docs/captures/bureau.png)
 
@@ -246,6 +247,7 @@ src/linux/            ce qui parle au noyau (appels système directs, sans libc)
   audio.c wifi.c nm.c plat.c       son ALSA, Wi-Fi (NetworkManager, ou wpa_supplicant sans Debian), fichiers, système, batterie
   update.c volumes.c xbridge.c     mises à jour et installation, clés USB, applications X11 (un serveur X par application)
 src/sim/sim.c         version Windows du bureau, pour l'aperçu
+docs/                 le site (GitHub Pages) : index.html, assets/ ; captures du README
 rootfs/etc/           système autonome : profil du shell, script DHCP, dépôts apk
 debian/               base Debian : seconde étape (setup.sh) et réglages (/etc)
 tools/                téléchargement Alpine et Debian (debian.py), polices, initramfs, image disque, écran de démarrage, tests
