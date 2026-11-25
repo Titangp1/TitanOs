@@ -42,7 +42,25 @@ static char *name_of(const char *path) {
     return strdup(tmp);
 }
 
+/* Base Debian (mode hébergé) : udev charge les pilotes ; TitanOs demande les siens à modprobe,
+ * qui lit /etc/modprobe.d (mêmes réglages que ci-dessous, voir debian/etc/modprobe.d) */
+static bool modprobe(const char *name, bool remove) {
+    int pid = sys_fork();
+    if (pid == 0) {
+        int nul = sys_open("/dev/null", O_RDWR, 0);
+        if (nul >= 0) { sys_dup2(nul, 0); sys_dup2(nul, 1); sys_dup2(nul, 2); }
+        char *argv[] = { "/usr/sbin/modprobe", "-q", remove ? "-r" : "--", (char *)name, NULL };
+        sys_execve(argv[0], argv, g_envp);
+        sys_exit(127);
+    }
+    if (pid < 0) return false;
+    int st = 0;
+    sys_wait4(pid, &st, 0);
+    return st == 0;
+}
+
 void modules_init(void) {
+    if (g_hosted) return;
     /* une seule fois : la session est une copie de /init, qui a déjà lu les tables.
      * Les relire ajouterait les entrées au-delà de la place réservée. */
     if (mods || aliases) return;
@@ -125,6 +143,7 @@ bool module_load(const char *name) {
     char n[96];
     strlcpy(n, name, sizeof n);
     normalize(n);
+    if (g_hosted) return loaded(n) || modprobe(n, false);
     mod_t *m = find_mod(n);
     if (!m) return false;
     if (loaded(n)) return true;
@@ -213,6 +232,7 @@ static void scan_bus(const char *bus, int type, void *ctx) {
 }
 
 int modules_coldplug(bool display_only) {
+    if (g_hosted) return 0;                   /* udev s'en charge */
     scan_t s = { 0 };
     s.display_only = display_only;
     if (display_only) { s.bus = "pci"; for_each_dir("/sys/bus/pci/devices", scan_dev, &s); }
@@ -247,6 +267,11 @@ bool module_reload(const char *name) {
     char n[96];
     strlcpy(n, name, sizeof n);
     normalize(n);
+    if (g_hosted) {
+        bool ok = modprobe(n, true) && modprobe(n, false);
+        klog("pilote %s rechargé (%s)", n, ok ? "ok" : "échec");
+        return ok;
+    }
     long r = sc2(__NR_delete_module, (long)n, 0x800 /* O_NONBLOCK */);
     for (int i = 0; i < 40 && loaded(n); i++) sleep_ms(25);
     mod_t *m = find_mod(n);

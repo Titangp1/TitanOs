@@ -25,8 +25,8 @@ typedef __builtin_va_list va_list;
 #define false 0
 #define NULL  ((void *)0)
 
-#define TITANOS_VERSION "Bêta 32"
-#define TITANOS_BUILD   32             /* numéro de version, comparé aux mises à jour publiées */
+#define TITANOS_VERSION "Bêta 33"
+#define TITANOS_BUILD   33             /* numéro de version, comparé aux mises à jour publiées */
 #define countof(a) ((int)(sizeof(a) / sizeof((a)[0])))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -151,6 +151,7 @@ typedef struct { char name[16], mac[18], ip[16], kind[16]; bool up, carrier, int
 int   plat_netifs(netif_t *list, int max);
 void  plat_power(int action);                               /* 0 éteindre, 1 redémarrer */
 void  plat_suspend(void);                                   /* mise en veille */
+bool  plat_debian(void);                                    /* sur la base Debian (apt, NetworkManager, systemd) */
 int   plat_volumes(void *list, int max);                  /* volumes branchés (volume_t) */
 bool  plat_eject(const char *path);                       /* démonte un volume */
 void  plat_random(void *buf, size_t n);                    /* octets aléatoires */

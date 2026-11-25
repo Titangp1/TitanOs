@@ -1,10 +1,12 @@
 /* TitanOs - Logithèque : installer des applications Linux en un clic
  *
- * Python et Node.js (paquets Alpine) s'ouvrent dans le Terminal. LibreOffice et GIMP
- * (paquets Alpine), VS Code et Discord (Flatpak, depuis Flathub) sont des applications
- * graphiques X11 : chacune tourne sur son propre serveur X en mémoire et s'affiche dans
- * une fenêtre TitanOs (voir src/linux/xbridge.c). Une fois installées, elles apparaissent
- * dans le menu Démarrer, avec leur propre icône, et peuvent être mises sur le bureau. */
+ * Base Debian : tout passe par apt. LibreOffice, GIMP, Python et Node.js viennent des dépôts
+ * Debian ; VS Code, Discord et Google Chrome sont les paquets .deb officiels de leurs éditeurs.
+ * (Système autonome, sans Debian : paquets Alpine et Flatpak, comme avant.)
+ * Python et Node.js s'ouvrent dans le Terminal ; les autres sont des applications graphiques
+ * X11 : chacune tourne sur son propre serveur X en mémoire et s'affiche dans une fenêtre
+ * TitanOs (voir src/linux/xbridge.c). Une fois installées, elles apparaissent dans le menu
+ * Démarrer, avec leur propre icône, et peuvent être mises sur le bureau. */
 #include "desk.h"
 
 bool png_decode(const uint8_t *f, size_t n, canvas_t *out);
@@ -75,17 +77,80 @@ static sapp_t APPS[STORE_MAX] = {
 static int napps = NFIXED;
 #define NAPPS napps
 
+/* ---- les mêmes, dans la base Debian (apt) ---- */
+/* « @ de à message » : étape annoncée à TitanOs (partie de la barre de progression) ;
+ * APT::Status-Fd=1 : apt écrit son avancement sur la sortie */
+#define APT "apt-get -y -q -o APT::Status-Fd=1 -o Dpkg::Use-Pty=0 -o DPkg::Lock::Timeout=300 "
+#define APT_UPDATE "echo '@ 0 8 Mise à jour de la liste des paquets…'; " APT "update >/dev/null 2>&1 || true; echo '@ 8 100 Installation…'; "
+#define APT_REMOVE(p) APT "purge " p " && " APT "autoremove --purge"
+#define DEB_GET(url, name, what) \
+    "set -e; " APT_UPDATE "echo '@ 8 45 Téléchargement de " what "…'; " \
+    "curl -fL --retry 3 -# -o /var/tmp/" name ".deb '" url "' 2>&1 | tr '\\r' '\\n'; " \
+    "echo '@ 45 100 Installation de " what "…'; " APT "install /var/tmp/" name ".deb; rm -f /var/tmp/" name ".deb"
+static const sapp_t APPS_DEB[NFIXED] = {
+    { "libreoffice", "LibreOffice", "Traitement de texte, tableur et présentations, compatibles avec Word, Excel et PowerPoint.",
+      "≈ 450 Mo",
+      APT_UPDATE APT "install --no-install-recommends libreoffice-writer libreoffice-calc libreoffice-impress "
+      "libreoffice-l10n-fr libreoffice-gtk3 fonts-liberation2 fonts-dejavu",
+      APT_REMOVE("'libreoffice*'"),
+      "/usr/lib/libreoffice/program/soffice",
+      "exec libreoffice --nologo", NULL,
+      { "/usr/share/icons/hicolor/128x128/apps/libreoffice-startcenter.png", "/usr/share/icons/hicolor/256x256/apps/libreoffice-startcenter.png",
+        "/usr/share/icons/hicolor/64x64/apps/libreoffice-startcenter.png", "/usr/share/icons/hicolor/48x48/apps/libreoffice-startcenter.png" },
+      0x34D399, 0x0E7490, "LO" },
+    { "vscode", "VS Code", "L'éditeur de code de Microsoft, avec ses extensions. Paquet officiel de Microsoft.",
+      "≈ 400 Mo",
+      DEB_GET("https://update.code.visualstudio.com/latest/linux-deb-x64/stable", "vscode", "VS Code"),
+      APT_REMOVE("code"),
+      "/usr/bin/code",
+      "exec code --disable-gpu --no-sandbox", NULL,
+      { "/usr/share/pixmaps/vscode.png", "/usr/share/pixmaps/code.png", "/usr/share/code/resources/app/resources/linux/code.png", NULL },
+      0x38BDF8, 0x1D4ED8, "</>" },
+    { "discord", "Discord", "Discussions, salons et appels avec vos amis. Paquet officiel de Discord.",
+      "≈ 300 Mo",
+      DEB_GET("https://discord.com/api/download?platform=linux&format=deb", "discord", "Discord"),
+      APT_REMOVE("discord"),
+      "/usr/bin/discord|/usr/share/discord/Discord",
+      "exec discord --disable-gpu --no-sandbox", NULL,
+      { "/usr/share/pixmaps/discord.png", "/usr/share/discord/discord.png", NULL, NULL },
+      0x818CF8, 0x4338CA, "D" },
+    { "python", "Python 3", "Le langage de programmation, avec pip et venv pour ajouter des modules. S'ouvre dans le Terminal.",
+      "≈ 80 Mo",
+      APT_UPDATE APT "install python3 python3-pip python3-venv", APT_REMOVE("python3-pip python3-venv"),
+      "/usr/bin/pip3", NULL, "python3", { NULL }, 0x60A5FA, 0x1E3A8A, "Py" },
+    { "nodejs", "Node.js", "JavaScript hors du navigateur, avec npm. S'ouvre dans le Terminal.",
+      "≈ 120 Mo",
+      APT_UPDATE APT "install --no-install-recommends nodejs npm", APT_REMOVE("nodejs npm"),
+      "/usr/bin/npm", NULL, "node", { NULL }, 0x86EFAC, 0x15803D, "JS" },
+    { "gimp", "GIMP", "Retouche de photos et dessin.",
+      "≈ 250 Mo",
+      APT_UPDATE APT "install --no-install-recommends gimp", APT_REMOVE("gimp"),
+      "/usr/bin/gimp", "exec gimp", NULL,
+      { "/usr/share/icons/hicolor/256x256/apps/gimp.png", "/usr/share/icons/hicolor/128x128/apps/gimp.png",
+        "/usr/share/icons/hicolor/64x64/apps/gimp.png", "/usr/share/icons/hicolor/48x48/apps/gimp.png" },
+      0xFDBA74, 0x9A3412, "G" },
+};
+#define FLATPAK_DEB "mkdir -p /var/tmp; echo '@ 0 30 Installation de Flatpak…'; " APT "install --no-install-recommends flatpak; " \
+                    "echo '@ 30 100 Téléchargement depuis Flathub…'; " FLATHUB
+static void debian_apps(void) {
+    static bool done;
+    if (done || !plat_debian()) return;
+    done = true;
+    for (int i = 0; i < NFIXED; i++) APPS[i] = APPS_DEB[i];
+}
+
 /* Applications Flathub installées depuis la recherche : gardées dans l'espace des
  * applications (/var/lib/titanos/apps.list, « identifiant<TAB>nom »), avec le reste */
 #define APPS_LIST "/var/lib/titanos/apps.list"
-static struct { char id[96], name[64], install[400], remove[200], check[160], run[200], icons[4][180]; } custom[STORE_MAX - NFIXED];
+static struct { char id[96], name[64], install[700], remove[200], check[160], run[200], icons[4][180]; } custom[STORE_MAX - NFIXED];
 static void custom_add(const char *id, const char *name) {
     if (napps >= STORE_MAX) return;
     for (int i = 0; i < napps; i++) if (APPS[i].check && strstr(APPS[i].check, id)) return;
     int k = napps - NFIXED;
     strlcpy(custom[k].id, id, sizeof custom[k].id);
     strlcpy(custom[k].name, name, sizeof custom[k].name);
-    snprintf(custom[k].install, sizeof custom[k].install, FLATPAK_BASE "flatpak install -y --noninteractive --system flathub %s", id);
+    snprintf(custom[k].install, sizeof custom[k].install, "%sflatpak install -y --noninteractive --system flathub %s",
+             plat_debian() ? FLATPAK_DEB : FLATPAK_BASE, id);
     snprintf(custom[k].remove, sizeof custom[k].remove, "flatpak uninstall -y --noninteractive %s && flatpak uninstall -y --noninteractive --unused", id);
     snprintf(custom[k].check, sizeof custom[k].check, "/var/lib/flatpak/app/%s/current", id);
     snprintf(custom[k].run, sizeof custom[k].run, "exec flatpak run --filesystem=/media %s", id);
@@ -109,6 +174,7 @@ static void custom_add(const char *id, const char *name) {
 }
 static void custom_load(void) {
     static bool done;
+    debian_apps();
     if (done) return;
     done = true;
     char *d;
@@ -137,9 +203,10 @@ static void custom_save(void) {
 static struct { canvas_t mip[4]; bool tried; int inst; uint64_t checked; } ST[STORE_MAX];   /* inst : -1 inconnu */
 
 int store_count(void) { custom_load(); return NAPPS; }
-const char *store_name(int k) { return k >= 0 && k < NAPPS ? APPS[k].name : "Application"; }
+const char *store_name(int k) { debian_apps(); return k >= 0 && k < NAPPS ? APPS[k].name : "Application"; }
 
 bool store_installed(int k) {
+    debian_apps();
     if (k < 0 || k >= NAPPS) return false;
     uint64_t now = plat_ms();
     if (ST[k].checked && now - ST[k].checked < 3000) return ST[k].inst > 0;
@@ -370,6 +437,7 @@ static rect_t res_row(canvas_t *c, int k, int scroll) { return R(16, 96 + k * 66
 static rect_t res_btn(rect_t r) { return R(r.x + r.w - 14 - 130, r.y + 13, 130, 34); }
 static char res_job_id[SRES_MAX][104];
 static const char *res_key(const sres_t *r, char *out, int n) { snprintf(out, (size_t)n, "%s:%s", r->flathub ? "fp" : "apk", r->flathub ? r->id : r->name); return out; }
+static const char *repo_name(void) { return plat_debian() ? "Debian" : "Alpine"; }
 
 #define CARD_H 136
 
@@ -394,7 +462,7 @@ static rect_t remove_btn(rect_t r) { return R(r.x + r.w - 16 - 120 - 10 - 120, r
 
 static void draw_results(st_t *s, canvas_t *c) {
     canvas_clip(c, R(0, 88, c->w, c->h - 88));
-    if (s->searching) text_center(c, &font_body, R(0, 140, c->w, 24), "Recherche dans Alpine et Flathub…", C_MUTED);
+    if (s->searching) text_center(c, &font_body, R(0, 140, c->w, 24), plat_debian() ? "Recherche dans Debian…" : "Recherche dans Alpine et Flathub…", C_MUTED);
     else if (!s->nres) text_center(c, &font_body, R(0, 140, c->w, 24), "Aucun résultat. Essayez un autre mot (en anglais : « editor », « music »…).", C_MUTED);
     for (int k = 0; k < s->nres; k++) {
         rect_t r = res_row(c, k, s->rscroll);
@@ -405,7 +473,7 @@ static void draw_results(st_t *s, canvas_t *c) {
         char ini[4] = { (char)(x->name[0] >= 'a' && x->name[0] <= 'z' ? x->name[0] - 32 : x->name[0]), 0 };
         text_center(c, &font_title, R(r.x + 12, r.y + 19, 40, 22), ini, 0xFFFFFFFF);
         text_fit(c, &font_bold, r.x + 66, r.y + 10, r.w - 300, x->name, C_TEXT);
-        text_draw(c, &font_small, r.x + r.w - 14 - 130 - 80, r.y + 22, x->flathub ? "Flathub" : "Alpine", C_MUTED);
+        text_draw(c, &font_small, r.x + r.w - 14 - 130 - 80, r.y + 22, x->flathub ? "Flathub" : repo_name(), C_MUTED);
         text_fit(c, &font_small, r.x + 66, r.y + 32, r.w - 300, x->desc, C_TEXT2);
         char key[104], msg[160];
         int pc = -1, st = plat_app_state(res_key(x, key, sizeof key), msg, sizeof msg, &pc);
@@ -423,7 +491,8 @@ static void st_draw(window_t *w, canvas_t *c) {
     draw_icon(c, ICON_STORE, 24, 22, 48);
     text_draw(c, &font_h2, 86, 22, "Logithèque", C_TEXT);
     text_fit(c, &font_small, 86, 56, c->w - 110 - 340,
-             s->results ? "Paquets Alpine (commandes du Terminal) et applications Flathub. Échap : retour." :
+             s->results ? (plat_debian() ? "Paquets Debian (applications et commandes du Terminal). Échap : retour." :
+                                            "Paquets Alpine (commandes du Terminal) et applications Flathub. Échap : retour.") :
              "Des applications Linux, installées dans l'espace des applications. Elles rejoignent le menu Démarrer.", C_TEXT2);
     ui_field(c, search_rect(c), &s->search, "Chercher un paquet ou une application…");
     if (s->results) { draw_results(s, c); return; }
@@ -476,8 +545,18 @@ static void start_search(st_t *s) {
     q[k] = 0;
     if (!q[0]) { s->results = false; return; }
     strlcpy(s->query, q, sizeof s->query);
-    static char script[900];
-    snprintf(script, sizeof script,
+    static char script[1100];
+    if (plat_debian())
+        snprintf(script, sizeof script,
+                 "f=/run/titanos-recherche.txt; : > $f.tmp;"
+                 " [ -n \"$(find /var/lib/apt/lists -maxdepth 1 -name '*Packages*' -mmin -720 2>/dev/null | head -n 1)\" ]"
+                 " || apt-get update -q >/dev/null 2>&1;"
+                 " { apt-cache search --names-only -- '%s'; apt-cache search -- '%s'; } 2>/dev/null | awk '!seen[$1]++' | head -n 40"
+                 " | sed 's/^/D\t/' >> $f.tmp;"
+                 " if [ -x /usr/bin/flatpak ]; then flatpak update --appstream -y >/dev/null 2>&1;"
+                 " flatpak search --columns=name,description,application -- '%s' 2>/dev/null"
+                 " | head -n 20 | sed 's/^/F\t/' >> $f.tmp; fi; mv -f $f.tmp $f", q, q, q);
+    else snprintf(script, sizeof script,
              "f=/run/titanos-recherche.txt; : > $f.tmp;"
              " apk search -v -d -- '%s' 2>/dev/null | head -n 40 | sed 's/^/A\t/' >> $f.tmp;"
              " if [ -x /usr/bin/flatpak ]; then flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo >/dev/null 2>&1;"
@@ -503,7 +582,12 @@ static void read_results(st_t *s) {
         *nl = 0;
         sres_t *r = &s->res[s->nres];
         memset(r, 0, sizeof *r);
-        if (p[0] == 'A' && p[1] == '\t') {                 /* « nom-1.2-r0 - description » */
+        if (p[0] == 'D' && p[1] == '\t') {                 /* Debian : « nom - description » */
+            char *sep = strstr(p + 2, " - ");
+            if (sep) { *sep = 0; strlcpy(r->desc, sep + 3, sizeof r->desc); }
+            strlcpy(r->name, p + 2, sizeof r->name);
+            if (r->name[0]) s->nres++;
+        } else if (p[0] == 'A' && p[1] == '\t') {          /* « nom-1.2-r0 - description » */
             char *sep = strstr(p + 2, " - ");
             if (sep) { *sep = 0; strlcpy(r->desc, sep + 3, sizeof r->desc); }
             strlcpy(r->name, p + 2, sizeof r->name);
@@ -530,9 +614,11 @@ static void read_results(st_t *s) {
 
 static void install_result(st_t *s, int k) {
     sres_t *r = &s->res[k];
-    char key[104], script[600];
+    char key[104], script[900];
     res_key(r, key, sizeof key);
-    if (r->flathub) snprintf(script, sizeof script, FLATPAK_BASE "flatpak install -y --noninteractive --system flathub %s", r->id);
+    if (r->flathub) snprintf(script, sizeof script, "%sflatpak install -y --noninteractive --system flathub %s",
+                             plat_debian() ? FLATPAK_DEB : FLATPAK_BASE, r->id);
+    else if (plat_debian()) snprintf(script, sizeof script, APT_UPDATE APT "install %s", r->name);
     else snprintf(script, sizeof script, "apk add --no-progress %s", r->name);
     if (!plat_app_install(key, script)) {
         char m[200];

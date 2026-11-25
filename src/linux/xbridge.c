@@ -19,6 +19,7 @@ typedef struct { char id[24]; char script[1100]; } job_req_t;
 static job_req_t jq[8];
 static int njq;
 static int job_pid = -1, job_fd = -1, job_pc = -1, job_len, job_n, job_k;
+static int job_from, job_to = 100;           /* étape en cours (ligne « @ de à message ») : partie de la barre */
 static char job_id[24], job_line[512], job_msg[160], job_err[160];
 /* résultat de la dernière installation de chaque application */
 static struct { char id[24]; bool ok; char msg[160]; } results[16];
@@ -49,7 +50,11 @@ static void job_next(void) {
         char *argv[] = { "/bin/busybox", "sh", "-c", r.script, NULL };
         static char *env[] = { "PATH=/usr/bin:/bin:/usr/sbin:/sbin", "HOME=/root", "LANG=C.UTF-8", "TERM=dumb",
                                "XDG_RUNTIME_DIR=/run/xdg", NULL };
-        sys_execve(argv[0], argv, env);
+        /* Debian : apt, sans questions ; ses étapes arrivent sur la sortie (APT::Status-Fd=1) */
+        static char *denv[] = { "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/root", "LANG=C.UTF-8",
+                                "TERM=dumb", "DEBIAN_FRONTEND=noninteractive", "APT_LISTCHANGES_FRONTEND=none", NULL };
+        if (g_hosted) { argv[0] = "/bin/sh"; argv[1] = "-c"; argv[2] = r.script; argv[3] = NULL; }
+        sys_execve(argv[0], argv, g_hosted ? denv : env);
         sys_exit(127);
     }
     sys_close(p[1]);
@@ -59,6 +64,8 @@ static void job_next(void) {
     job_fd = p[0];
     job_pc = -1;
     job_len = job_n = job_k = 0;
+    job_from = 0;
+    job_to = 100;
     job_err[0] = 0;
     strlcpy(job_id, r.id, sizeof job_id);
     strlcpy(job_msg, "Préparation…", sizeof job_msg);
@@ -66,7 +73,7 @@ static void job_next(void) {
 }
 
 bool plat_app_install(const char *id, const char *script) {
-    if (!path_exists("/.titan/upper")) {
+    if (!g_hosted && !path_exists("/.titan/upper")) {
         job_result(id, false, "Il faut l'espace des applications (TitanOs installé sur un disque ou une clé d'au moins 4 Go).");
         return false;
     }
@@ -85,6 +92,38 @@ bool plat_app_install(const char *id, const char *script) {
 static void job_parse(char *l) {
     while (*l == ' ' || *l == '\t') l++;
     if (!*l) return;
+    /* étape annoncée par le script : « @ 0 40 Téléchargement de Google Chrome… » */
+    if (l[0] == '@' && l[1] == ' ') {
+        char *q = l + 2;
+        job_from = atoi(q);
+        while (*q && *q != ' ') q++;
+        while (*q == ' ') q++;
+        job_to = atoi(q);
+        while (*q && *q != ' ') q++;
+        while (*q == ' ') q++;
+        if (job_to <= job_from) job_to = 100;
+        job_pc = job_from;
+        if (*q) strlcpy(job_msg, q, sizeof job_msg);
+        return;
+    }
+    /* apt (APT::Status-Fd) : « dlstatus:paquet:45.2:Téléchargement… », « pmstatus:paquet:60:Installation… » */
+    bool dl = str_starts(l, "dlstatus:"), pm = str_starts(l, "pmstatus:");
+    if (dl || pm) {
+        char *a = strchr(l + 9, ':');
+        if (!a) return;
+        float pc = (float)atoi(a + 1);
+        int span = job_to - job_from;
+        /* téléchargement : première moitié de l'étape, installation : seconde moitié */
+        int v = job_from + (int)((dl ? pc * 0.5f : 50 + pc * 0.5f) * span / 100.0f);
+        job_pc = MIN(99, MAX(job_pc, v));
+        char pk[48];
+        int k = 0;
+        for (const char *p = l + 9; *p && *p != ':' && k < 47; p++) pk[k++] = *p;
+        pk[k] = 0;
+        snprintf(job_msg, sizeof job_msg, dl ? "Téléchargement… %s" : "Installation… %s", pk);
+        return;
+    }
+    if (str_starts(l, "E: ")) { strlcpy(job_err, l + 3, sizeof job_err); klog("installation de %s : %s", job_id, l); return; }
     /* apk : « (12/249) Installing libdrm (2.4.124-r0) » */
     if (l[0] == '(') {
         const char *q = l + 1;
@@ -124,9 +163,14 @@ static void job_parse(char *l) {
     if (pcs && pcs > l && pcs[-1] >= '0' && pcs[-1] <= '9') {
         char *q = pcs - 1;
         while (q > l && q[-1] >= '0' && q[-1] <= '9') q--;
+        if (q - l >= 2 && q[-1] == '.' && q[-2] >= '0' && q[-2] <= '9') {      /* « 45.6% » (curl) */
+            q--;
+            while (q > l && q[-1] >= '0' && q[-1] <= '9') q--;
+        }
         int p = atoi(q);
         if (p >= 0 && p <= 100) {
             job_pc = job_n > 0 ? MIN(99, ((job_k - 1) * 100 + p) / job_n) : MIN(99, p);
+            if (job_from > 0 || job_to < 100) job_pc = MIN(99, job_from + p * (job_to - job_from) / 100);
             if (job_n > 0) snprintf(job_msg, sizeof job_msg, "Téléchargement et installation… élément %d sur %d", job_k, job_n);
             else strlcpy(job_msg, "Téléchargement et installation…", sizeof job_msg);
         }
@@ -202,18 +246,30 @@ static const char CHROME_SCRIPT[] =
     "flatpak install -y --noninteractive --system flathub " CHROME_ID " && "
     "{ apk del --no-progress chromium >/dev/null 2>&1; rm -rf /root/.config/chromium /root/.cache/chromium; true; }";
 
+/* Debian : le paquet officiel de Google (.deb), qui ajoute aussi son dépôt pour les mises à jour */
+#define APT_GET "apt-get -y -q -o APT::Status-Fd=1 -o Dpkg::Use-Pty=0 -o DPkg::Lock::Timeout=300 "
+static const char CHROME_DEB_SCRIPT[] =
+    "set -e; echo '@ 0 5 Mise à jour de la liste des paquets…'; " APT_GET "update >/dev/null 2>&1 || true; "
+    "echo '@ 5 45 Téléchargement de Google Chrome…'; "
+    "curl -fL --retry 3 -# -o /var/tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb 2>&1 | tr '\\r' '\\n'; "
+    "echo '@ 45 100 Installation de Google Chrome…'; " APT_GET "install /var/tmp/google-chrome.deb; rm -f /var/tmp/google-chrome.deb";
+#define CHROME_DEB "/usr/bin/google-chrome-stable"
+
 static const char *chromium_path(void) {
     if (path_exists("/usr/bin/chromium-browser")) return "/usr/bin/chromium-browser";
     if (path_exists("/usr/bin/chromium")) return "/usr/bin/chromium";
     return NULL;
 }
-static bool chrome_installed(void) { return path_exists("/var/lib/flatpak/app/" CHROME_ID "/current") && path_exists("/usr/bin/flatpak"); }
-static bool installed(void) { return (chrome_installed() || chromium_path()) && path_exists("/usr/bin/Xvfb"); }
+static bool chrome_installed(void) {
+    if (g_hosted) return path_exists(CHROME_DEB);
+    return path_exists("/var/lib/flatpak/app/" CHROME_ID "/current") && path_exists("/usr/bin/flatpak");
+}
+static bool installed(void) { return (chrome_installed() || (!g_hosted && chromium_path())) && path_exists("/usr/bin/Xvfb"); }
 bool plat_browser_is_chrome(void) { return chrome_installed() && path_exists("/usr/bin/Xvfb"); }
 
 bool plat_browser_install(void) {
     if (plat_browser_is_chrome()) return false;
-    return plat_app_install("chrome", CHROME_SCRIPT);
+    return plat_app_install("chrome", g_hosted ? CHROME_DEB_SCRIPT : CHROME_SCRIPT);
 }
 
 int plat_browser_state(char *msg, int n, int *percent) {
@@ -265,8 +321,9 @@ static int spawn_as(char *const *argv, char *const *env, bool user) {
         int nul = sys_open("/dev/null", O_RDWR, 0);
         if (nul >= 0) { sys_dup2(nul, 0); sys_dup2(nul, 1); sys_dup2(nul, 2); }
         if (user) {
-            static const uint32_t groups[] = { UID_USER, 18 /* audio */, 27 /* video */ };
-            sc2(__NR_setgroups, countof(groups), (long)groups);
+            uint32_t groups[32];
+            int ng = plat_user_groups(groups, 32);
+            sc2(__NR_setgroups, ng, (long)groups);
             if (sc3(__NR_setresgid, UID_USER, UID_USER, UID_USER) != 0 || sc3(__NR_setresuid, UID_USER, UID_USER, UID_USER) != 0) sys_exit(126);
             sys_chdir("/home/titan");
         }
@@ -296,7 +353,7 @@ static char **xenv_for(int disp, bool user) {
     env[k++] = dbuf;
     env[k++] = "LANG=fr_FR.UTF-8";
     env[k++] = "LANGUAGE=fr";
-    env[k++] = "PATH=/usr/bin:/bin:/usr/sbin:/sbin";
+    env[k++] = g_hosted ? "PATH=/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games" : "PATH=/usr/bin:/bin:/usr/sbin:/sbin";
     env[k++] = "XDG_DATA_DIRS=/var/lib/flatpak/exports/share:/usr/local/share:/usr/share";
     env[k++] = "NO_AT_BRIDGE=1";
     env[k++] = "GTK_A11Y=none";
@@ -332,6 +389,23 @@ static void snd_cb(const char *name, int type, void *ctx) {
     sc2(__NR_chmod, (long)p, 0660);
 }
 static void user_services(void) {
+    if (g_hosted) {
+        /* Debian : la session de titan (D-Bus, PipeWire pour le son) est lancée par systemd
+         * au démarrage (« linger ») ; on la relance seulement si elle manque */
+        if (!path_exists("/run/user/1000/bus")) {
+            int pid = sys_fork();
+            if (pid == 0) {
+                char *argv[] = { "/usr/bin/systemctl", "start", "user@1000.service", NULL };
+                sys_execve(argv[0], argv, g_envp);
+                sys_exit(127);
+            }
+            int st;
+            if (pid > 0) sys_wait4(pid, &st, 0);
+            for (int i = 0; i < 40 && !path_exists("/run/user/1000/bus"); i++) sleep_ms(50);
+            klog("session de titan : %s", path_exists("/run/user/1000/bus") ? "prête" : "D-Bus absent");
+        }
+        return;
+    }
     mkdirs("/run/user/1000");
     sc3(__NR_chown, (long)"/run/user", 0, 0);
     sc3(__NR_chown, (long)"/run/user/1000", UID_USER, UID_USER);
@@ -688,6 +762,7 @@ static void xs_launch(xs_t *x) {
     spawn_env(kb, xenv(x->disp));
     if (x->cmd[0]) {
         char *argv[] = { "/bin/busybox", "sh", "-c", x->cmd, NULL };
+        if (g_hosted) { argv[0] = "/bin/sh"; argv[1] = "-c"; argv[2] = x->cmd; argv[3] = NULL; }
         x->app_pid = spawn_as(argv, xenv_for(x->disp, x->user), x->user);
         klog("X :%d : application lancée (pid %d)", x->disp, x->app_pid);
         return;
@@ -695,7 +770,14 @@ static void xs_launch(xs_t *x) {
     char size[48];
     snprintf(size, sizeof size, "--window-size=%d,%d", x->win_w, x->win_h);
     const char *url = start_url[0] ? start_url : "https://www.google.fr";
-    if (chrome_installed()) {
+    if (g_hosted && chrome_installed()) {
+        /* Debian : Google Chrome tel quel, avec son bac à sable, sous le compte titan */
+        char *argv[] = { CHROME_DEB, "--no-first-run", "--no-default-browser-check", "--password-store=basic",
+                         "--disable-gpu", "--window-position=0,0", size, "--start-maximized", "--lang=fr",
+                         x->user ? (char *)url : "--no-sandbox", x->user ? NULL : (char *)url, NULL };
+        x->app_pid = spawn_as(argv, xenv_for(x->disp, x->user), x->user);
+        klog("Google Chrome : lancé (pid %d)", x->app_pid);
+    } else if (chrome_installed()) {
         /* Google Chrome : accès aux clés et au disque (/media) pour ouvrir et enregistrer */
         char *argv[] = { "/usr/bin/flatpak", "run", "--filesystem=/media", "--filesystem=xdg-download", CHROME_ID,
                          "--no-sandbox", "--test-type", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
@@ -814,7 +896,10 @@ void plat_browser_stop(void) { xs_stop(&XS[0]); }
 void plat_browser_open_url(const char *url) {
     if (XS[0].app_pid > 0 && plat_browser_running()) {
         bool u = XS[0].user;
-        if (chrome_installed()) {
+        if (g_hosted && chrome_installed()) {
+            char *argv[] = { CHROME_DEB, (char *)url, NULL };
+            spawn_as(argv, xenv_for(1, u), u);
+        } else if (chrome_installed()) {
             char *argv[] = { "/usr/bin/flatpak", "run", "--filesystem=/media", "--filesystem=xdg-download", CHROME_ID,
                              "--no-sandbox", "--test-type", (char *)url, NULL };
             spawn_as(argv, xenv_for(1, u), u);

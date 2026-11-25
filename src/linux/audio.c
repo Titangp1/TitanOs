@@ -42,7 +42,7 @@ static int find_pcm(int *card_out, int *dev_out) {
  * (dmix) pour que plusieurs applications puissent jouer en même temps. */
 static bool alsa_conf_done;
 static void alsa_conf_write(int card, int dev) {
-    if (alsa_conf_done) return;
+    if (alsa_conf_done || g_hosted) return;          /* Debian : PipeWire est la sortie par défaut */
     alsa_conf_done = true;
     char conf[640];
     snprintf(conf, sizeof conf,

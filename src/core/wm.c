@@ -96,6 +96,8 @@ static int last_click_x, last_click_y;
 static datetime_t now_dt;
 static char *clipboard;
 static char splash_step[96];
+static int splash_pc = -1;                 /* barre de progression du démarrage (installation de Debian) */
+static ui_progress_t splash_prog;
 
 /* état matériel affiché dans la barre */
 static battery_t bat;
@@ -1452,7 +1454,7 @@ static void draw_lock(void) {
 #define SPL_TEXT_Y     150
 
 static rect_t spinner_rect(void) { return R(scr_w / 2 - SPL_ANIM_W / 2, scr_h / 2 + SPL_ANIM_TOP, SPL_ANIM_W, SPL_ANIM_H); }
-static rect_t splash_text_rect(void) { return R(0, scr_h / 2 + SPL_TEXT_Y, scr_w, 24); }
+static rect_t splash_text_rect(void) { return R(0, scr_h / 2 + SPL_TEXT_Y, scr_w, 60); }
 
 /* les « crêtes » de TitanOs : cinq petits sommets, comme celui du logo, qui grandissent
  * et s'éclairent l'un après l'autre, en vague (même calcul que tools/bootimg.py) */
@@ -1480,6 +1482,7 @@ static void draw_splash(void) {
     }
     draw_peaks(scr_w / 2 - SPL_ANIM_W / 2, cy + SPL_ANIM_TOP, (float)now / 1000.0f);
     text_draw(T, &font_small, (scr_w - text_width(&font_small, splash_step)) / 2, cy + SPL_TEXT_Y, splash_step, 0xFF64748B);
+    if (splash_pc >= 0) ui_progress(T, R(scr_w / 2 - 150, cy + SPL_TEXT_Y + 34, 300, 6), &splash_prog, splash_pc);
 }
 
 /* ---------------- composition ---------------- */
@@ -2388,8 +2391,8 @@ void core_resize(int w, int h) {
 }
 
 void core_splash(const char *step, int percent) {
-    (void)percent;
     static bool drawn;
+    splash_pc = percent >= 0 ? MIN(percent, 100) : -1;
     bool first = mode != MODE_SPLASH || !drawn;
     drawn = true;
     strlcpy(splash_step, step, sizeof splash_step);
@@ -2511,6 +2514,7 @@ int core_frame(void) {
     bool anim = false;
     if (mode == MODE_SPLASH) {
         damage(spinner_rect(), 0);
+        if (splash_pc >= 0) damage(splash_text_rect(), 0);     /* la barre avance en douceur */
         compose();
         return 16;
     }

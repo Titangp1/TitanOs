@@ -2,6 +2,55 @@
 
 Toutes les versions sont dans les [versions publiées](../../releases). Depuis la bêta 6, TitanOs se met à jour tout seul.
 
+## Bêta 33 (0.33.0)
+
+**Nouvelle base : Debian 13**
+
+TitanOs garde son bureau, ses chargeurs, son écran de démarrage et toutes ses applications. En dessous, Debian 13 (trixie) remplace le système autonome, réduit à l'essentiel (environ 330 paquets) :
+- `apt` installe n'importe quel programme Linux ;
+- systemd démarre les services ;
+- NetworkManager gère le réseau ;
+- PipeWire gère le son.
+
+**Installation**
+- Au premier démarrage, TitanOs installe Debian depuis la clé (fichiers `DEBIAN.TXZ` et `DEBS.TAR`), avec une barre de progression sur l'écran de démarrage. Cela prend quelques minutes, une seule fois.
+- Ensuite, `/init` bascule sur Debian à chaque démarrage, et systemd relance le bureau de TitanOs.
+- Les TitanOs déjà installés téléchargent la base Debian (environ 300 Mo) au contrôle des mises à jour, puis l'installent au redémarrage.
+- L'ancien espace des applications est effacé en tâche de fond. Les réseaux Wi-Fi enregistrés et le profil de Google Chrome sont repris.
+
+**Applications**
+- **Google Chrome** : le paquet officiel de Google, mis à jour avec Debian. Il tourne avec son bac à sable, sous le compte `titan`.
+- **Logithèque** : par `apt`, avec la progression réelle du téléchargement et de l'installation.
+  - LibreOffice, GIMP, Python (pip et venv) et Node.js viennent de Debian.
+  - VS Code et Discord sont les paquets officiels de Microsoft et de Discord.
+  - La recherche trouve tout paquet Debian.
+- **Son des applications** : PipeWire, lancé avec la session de `titan`. Chrome, Discord et les autres ont le son sans réglage.
+
+**Système**
+- **Wi-Fi** : par NetworkManager.
+  - Fonctionne avec WPA2, WPA3, WPA2-Entreprise et les réseaux masqués.
+  - Les mots de passe ne passent jamais sur une ligne de commande.
+  - La console réseau montre aussi les messages de NetworkManager, et les erreurs sont expliquées en français.
+- **Câble et partage USB** : NetworkManager les configure tout seul.
+- **Terminal** :
+  - les commandes de Debian (`apt`, `nmcli`, `journalctl`, `systemctl`…) ;
+  - `apt install` demande sudo tout seul ;
+  - l'invite et les raccourcis de TitanOs sont gardés.
+- **Mises à jour** : « Rechercher » met aussi à jour les programmes Debian.
+- **Arrêt et veille** : par systemd, qui ferme proprement les services et les disques. Le bouton d'alimentation et le couvercle gardent le comportement de TitanOs.
+- **Plus léger** :
+  - sans paquets « recommandés » ;
+  - sans mises à jour automatiques en tâche de fond ;
+  - dpkg rapide sur clé USB ;
+  - pilotes du noyau compressés (zstd).
+
+**Sécurité**
+- Si l'installation échoue, TitanOs s'ouvre sans Debian, comme avant, et `installation-debian.txt` explique pourquoi.
+- Si le bureau ne démarre pas dans Debian, `journal-debian.txt` est copié sur la clé, puis TitanOs redémarre sans Debian jusqu'à la version suivante.
+- Le paramètre de démarrage `titanos.nodebian` reste sur le système autonome.
+
+Il faut maintenant une clé d'au moins 4 Go.
+
 ## Bêta 32 (0.32.0)
 
 Version **0.32.0** (bêta 32). À partir de celle-ci, les versions suivent un numéro sémantique `0.bêta.correctif` (voir la section « Versions » du README).

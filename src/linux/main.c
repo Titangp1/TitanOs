@@ -5,12 +5,24 @@
  *               à chaud, ramasse les processus terminés et relance la session si besoin ;
  *   - session : écran de démarrage animé pendant qu'un processus « démarrage » charge les
  *               pilotes et prépare la clé ; puis le son, le Wi-Fi, le réseau et le bureau.
- * Paramètre du noyau « titanos.shell » : ouvre directement un shell texte (dépannage). */
+ *
+ * Base Debian : l'espace des applications (partition ext4) contient un système Debian complet
+ * (/.titan/debian), installé au premier démarrage depuis TITANOS/DEBIAN.TXZ et DEBS.TAR. Dès
+ * qu'il est prêt, init y bascule (switch_root) et systemd prend le relais : il relance ce même
+ * programme, « titanos --session » (mode hébergé : g_hosted), pour le bureau.
+ * Paramètres du noyau : « titanos.shell » ouvre directement un shell texte (dépannage) ;
+ * « titanos.nodebian » reste sur le système autonome. */
 #include "linux.h"
 #include "../core/desk.h"
 #include <linux/kd.h>
 
 __asm__(".text\n.global _start\n_start:\n  xor %ebp, %ebp\n  mov %rsp, %rdi\n  and $-16, %rsp\n  call start_c\n  hlt\n");
+
+bool g_hosted;                       /* lancé par systemd dans la base Debian (« --session ») */
+static bool no_debian;               /* la bascule vers Debian a échoué : ce démarrage reste autonome */
+#define DEB_ROOT "/.titan/debian"
+#define DEB_NEW  "/.titan/debian.new"
+#define SESSION_TO_DEBIAN 42         /* code de sortie de la session : « basculer vers Debian » */
 
 /* ---------------- utilitaires ---------------- */
 static void quiet_child(void) {
@@ -236,20 +248,29 @@ static bool create_apps_partition(const char *disk, void (*say)(const char *)) {
     return r == 0;
 }
 
-/* Les applications installées (apk) vont dans la partition ext4 : elle est posée par-dessus
- * /usr, /lib, /etc... (overlayfs). Le système de base reste intact en dessous. */
-static bool setup_apps(void (*say)(const char *)) {
+/* La partition ext4 des applications, montée sur /.titan (créée au premier démarrage) */
+static bool mount_apps(void (*say)(const char *)) {
+    static bool mounted;
+    if (mounted) return true;
     char disk[32], part[32], pdev[48];
     if (!key_dev[0] || !disk_of(key_dev, disk, sizeof disk)) return false;
     part_name(disk, 2, part, sizeof part);
     snprintf(pdev, sizeof pdev, "/dev/%s", part);
     module_load("ext4");
-    module_load("overlay");
     if (!path_exists(pdev) && !create_apps_partition(disk, say)) return false;
     char *fsck[] = { "/sbin/e2fsck", "-p", pdev, NULL };
     run_wait(fsck);
     mkdirs("/.titan");
     if (sys_mount(pdev, "/.titan", "ext4", 1024 /* MS_NOATIME */, "") != 0) { klog("partition des applications : montage impossible"); return false; }
+    mounted = true;
+    return true;
+}
+
+/* Système autonome : les applications installées (apk) vont dans la partition ext4, posée
+ * par-dessus /usr, /lib, /etc... (overlayfs). Le système de base reste intact en dessous. */
+static bool setup_apps(void (*say)(const char *)) {
+    if (!mount_apps(say)) return false;
+    module_load("overlay");
     static const char *const dirs[] = { "usr", "bin", "sbin", "lib", "etc", "var", "root", "home" };
     int okn = 0;
     for (int i = 0; i < countof(dirs); i++) {
@@ -276,6 +297,11 @@ static void say(const char *s) {
     sys_write(boot_out, m, (size_t)n);
 }
 static void tell(const char *s) { sys_write(boot_out, s, strlen(s)); }
+static void sayp(int percent, const char *s) {           /* texte et barre de progression */
+    char m[200];
+    int n = snprintf(m, sizeof m, "P%d %s\n", percent, s);
+    sys_write(boot_out, m, (size_t)n);
+}
 
 /* Journal de diagnostic, copié sur la clé toutes les 5 s pendant les 4 premières minutes :
  * messages du noyau, pilotes chargés, périphériques d'entrée et, pour chaque processus
@@ -296,6 +322,9 @@ static void start_journal(void) {
         " [ -x /usr/sbin/iw ] && { iw reg get; for w in /sys/class/net/*/wireless; do d=${w%/wireless}; d=${d##*/};"
         " iw dev $d link; echo \"-- bornes connues du noyau ($d)\"; iw dev $d scan dump | grep -E '^BSS|SSID:|signal:|freq:'; done; };"
         " [ -x /sbin/wpa_cli ] && for s in /run/wpa_supplicant/*; do wpa_cli -p /run/wpa_supplicant -i ${s##*/} scan_results; done;"
+        " command -v nmcli >/dev/null && { echo '-- NetworkManager'; nmcli general; nmcli device; nmcli -f IN-USE,SSID,SIGNAL,SECURITY device wifi list;"
+        " journalctl -b -u NetworkManager -n 40 --no-pager -o short-monotonic; };"
+        " command -v systemctl >/dev/null && { echo; echo '== services en echec'; systemctl --failed --no-pager; };"
         " echo; echo '== entrees'; ls -l /dev/input /dev/dri; cat /proc/bus/input/devices;"
         " echo; echo '== pilotes'; cut -d' ' -f1 /proc/modules | tr '\\n' ' '; echo;"
         " echo; echo '== blocs'; cat /proc/partitions; echo; echo '== montages'; cat /proc/mounts;"
@@ -321,8 +350,275 @@ static void storage_label(char *out, int n) {
     else strlcpy(out, "Disque interne", (size_t)n);
 }
 
+/* ================================================================== */
+/* Base Debian : installation au premier démarrage                      */
+/* ================================================================== */
+static bool debian_ready(void) {
+    return path_exists(DEB_ROOT "/etc/titanos-ready") && path_exists(DEB_ROOT "/usr/lib/systemd/systemd");
+}
+
+/* archives de la base : sur la clé (image complète) ou dans l'espace des applications
+ * (téléchargées par une mise à jour) */
+static bool debian_file(const char *name, char *out, int n) {
+    snprintf(out, (size_t)n, "/media/titanos/TITANOS/%s", name);
+    if (path_exists(out)) return true;
+    snprintf(out, (size_t)n, "/.titan/%s", name);
+    return path_exists(out);
+}
+
+static bool write_all(int fd, const uint8_t *p, long n) {
+    while (n > 0) {
+        long w = sys_write(fd, p, (size_t)n);
+        if (w <= 0) return false;
+        p += w;
+        n -= w;
+    }
+    return true;
+}
+
+static void no_sigpipe(void) {
+    struct { void *handler; unsigned long flags; void *restorer; unsigned long mask; } ign = { (void *)1 /* SIG_IGN */, 0, NULL, 0 };
+    sys_rt_sigaction(13 /* SIGPIPE */, &ign, NULL);
+}
+
+/* envoie un fichier dans une commande (busybox sh -c), en le lisant ici : l'avancement est exact */
+static bool feed(const char *src, const char *cmd, int from, int to, const char *msg) {
+    int fd = sys_open(src, O_RDONLY | O_CLOEXEC, 0);
+    if (fd < 0) return false;
+    struct stat st;
+    long total = sc2(__NR_fstat, fd, (long)&st) == 0 ? (long)st.st_size : 0;
+    int p[2];
+    if (sys_pipe2(p, O_CLOEXEC) < 0) { sys_close(fd); return false; }
+    int pid = sys_fork();
+    if (pid == 0) {
+        sys_dup2(p[0], 0);
+        int lg = sys_open("/run/installation-debian.txt", O_WRONLY | O_CREAT | O_APPEND, 0644);
+        if (lg >= 0) { sys_dup2(lg, 1); sys_dup2(lg, 2); }
+        char *argv[] = { "/bin/busybox", "sh", "-c", (char *)cmd, NULL };
+        sys_execve(argv[0], argv, g_envp);
+        sys_exit(127);
+    }
+    sys_close(p[0]);
+    static uint8_t buf[1 << 20];
+    long done = 0;
+    int last = -1;
+    bool ok = pid > 0;
+    while (ok) {
+        long r = sys_read(fd, buf, sizeof buf);
+        if (r < 0) ok = false;
+        if (r <= 0) break;
+        if (!write_all(p[1], buf, r)) { ok = false; break; }
+        done += r;
+        int pc = from + (int)((long)(to - from) * (done >> 10) / ((total >> 10) + 1));
+        if (pc != last) { sayp(pc, msg); last = pc; }
+    }
+    sys_close(p[1]);
+    sys_close(fd);
+    int status = -1;
+    if (pid > 0) sys_wait4(pid, &status, 0);
+    if (!ok || status != 0) klog("Debian : « %s » a échoué (code %d)", cmd, status);
+    return ok && status == 0;
+}
+
+/* seconde étape (debian/setup.sh) dans la nouvelle racine : ses lignes « P <pourcentage>
+ * <message> » font avancer la barre */
+static bool debian_chroot(void) {
+    static const char *const binds[] = { "/dev", "/dev/pts", "/proc", "/sys" };
+    for (int i = 0; i < countof(binds); i++) {
+        char t[64];
+        snprintf(t, sizeof t, DEB_NEW "%s", binds[i]);
+        mkdirs(t);
+        sys_mount(binds[i], t, NULL, 4096 /* MS_BIND */, NULL);
+    }
+    mkdirs(DEB_NEW "/run");
+    sys_mount("tmpfs", DEB_NEW "/run", "tmpfs", 0, "mode=0755");
+    int p[2];
+    bool ok = false;
+    if (sys_pipe2(p, O_CLOEXEC) == 0) {
+        int pid = sys_fork();
+        if (pid == 0) {
+            sys_dup2(p[1], 1);
+            int lg = sys_open("/run/installation-debian.txt", O_WRONLY | O_CREAT | O_APPEND, 0644);
+            if (lg >= 0) sys_dup2(lg, 2);
+            int nul = sys_open("/dev/null", O_RDONLY, 0);
+            if (nul >= 0) sys_dup2(nul, 0);
+            static char *env[] = { "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/root", "TERM=linux", NULL };
+            char *argv[] = { "/bin/busybox", "chroot", DEB_NEW, "/bin/sh", "/titanos/setup.sh", NULL };
+            sys_execve(argv[0], argv, env);
+            sys_exit(127);
+        }
+        sys_close(p[1]);
+        char buf[1024];
+        int len = 0;
+        for (;;) {
+            long r = sys_read(p[0], buf + len, sizeof buf - 1 - (size_t)len);
+            if (r <= 0) break;
+            len += (int)r;
+            buf[len] = 0;
+            char *nl;
+            while ((nl = strchr(buf, '\n'))) {
+                *nl = 0;
+                if (buf[0] == 'P' && buf[1] == ' ') {
+                    char *sp = strchr(buf + 2, ' ');
+                    sayp(atoi(buf + 2), sp ? sp + 1 : "Installation de Debian…");
+                }
+                int rest = len - (int)(nl + 1 - buf);
+                memmove(buf, nl + 1, (size_t)rest + 1);
+                len = rest;
+            }
+            if (len >= (int)sizeof buf - 1) len = 0;
+        }
+        sys_close(p[0]);
+        int status = -1;
+        if (pid > 0) sys_wait4(pid, &status, 0);
+        ok = status == 0 && path_exists(DEB_NEW "/etc/titanos-ready");
+        klog("Debian : seconde étape terminée (code %d)", status);
+    }
+    sys_umount2(DEB_NEW "/run", 2 /* MNT_DETACH */);
+    for (int i = countof(binds) - 1; i >= 0; i--) {
+        char t[64];
+        snprintf(t, sizeof t, DEB_NEW "%s", binds[i]);
+        sys_umount2(t, 2);
+    }
+    return ok;
+}
+
+static void sh_run(const char *script) {
+    char *argv[] = { "/bin/busybox", "sh", "-c", (char *)script, NULL };
+    run_wait(argv);
+}
+
+/* Installation de la base (une seule fois, quelques minutes) : extraction de DEBIAN.TXZ,
+ * paquets de DEBS.TAR posés dans le cache d'apt, puis debian/setup.sh dans la nouvelle racine.
+ * Deux échecs de suite avec les mêmes archives : on n'essaie plus (système autonome). */
+static bool debian_install(const char *txz, const char *debs) {
+    no_sigpipe();
+    struct stat st;
+    long size = sys_stat(txz, &st) == 0 ? (long)st.st_size : 0;
+    char mark[64], want[32];
+    snprintf(want, sizeof want, "%ld", size);
+    int fails = 0;
+    if (read_file("/.titan/debian.echec", mark, sizeof mark) > 0) {
+        char *nl = strchr(mark, '\n');
+        if (nl) { *nl = 0; if (!strcmp(mark, want)) fails = atoi(nl + 1); }
+    }
+    if (fails >= 2) { klog("Debian : deux échecs avec ces archives, installation abandonnée"); return false; }
+    struct { long type, bsize; unsigned long blocks, bfree, bavail, files, ffree; int fsid[2]; long namelen, frsize, flags, spare[4]; } fs;
+    if (sc2(__NR_statfs, (long)"/.titan", (long)&fs) == 0 && (long)(fs.bavail * (unsigned long)fs.bsize >> 20) < 1800
+        && path_exists("/.titan/upper/var/lib/flatpak")) {
+        /* pas assez de place : les anciennes applications Flatpak (remplacées par les paquets
+         * Debian) partent d'abord ; le reste de l'ancien espace est gardé jusqu'à la fin */
+        sayp(0, "Place libérée pour Debian : anciennes applications Flatpak…");
+        sh_run("rm -rf /.titan/upper/var/lib/flatpak /.titan/upper/var/cache /.titan/upper/root/.cache /.titan/upper/home/titan/.cache; sync");
+        klog("Debian : anciennes applications Flatpak supprimées pour faire de la place");
+    }
+    if (sc2(__NR_statfs, (long)"/.titan", (long)&fs) == 0) {
+        long free_mb = (long)(fs.bavail * (unsigned long)fs.bsize >> 20);
+        if (free_mb < 1800 && !path_exists(DEB_NEW)) {
+            klog("Debian : pas assez de place dans l'espace des applications (%ld Mo libres, 1800 nécessaires)", free_mb);
+            return false;
+        }
+    }
+    klog("Debian : installation de la base (%s)", txz);
+    sayp(0, "Installation de Debian (une seule fois, quelques minutes)…");
+    sh_run("rm -rf " DEB_NEW " /run/installation-debian.txt");
+    mkdirs(DEB_NEW);
+    char cmd[200];
+    bool ok = feed(txz, "unxz -c | tar -xf - -C " DEB_NEW, 1, 24, "Installation de Debian : extraction du système…");
+    if (ok) {
+        mkdirs(DEB_NEW "/var/cache/apt/archives");
+        ok = feed(debs, "tar -xf - -C " DEB_NEW "/var/cache/apt/archives", 24, 40, "Installation de Debian : copie des paquets…");
+    }
+    if (ok) ok = debian_chroot();
+    /* rapport, sur la clé */
+    sh_run("{ cat /run/installation-debian.txt; echo; echo '== seconde etape'; cat " DEB_NEW "/titanos/install.log; } "
+           "> /media/titanos/installation-debian.txt 2>/dev/null; sync");
+    if (!ok) {
+        char m[64];
+        snprintf(m, sizeof m, "%s\n%d\n", want, fails + 1);
+        write_file("/.titan/debian.echec", m);
+        sh_run("rm -rf " DEB_NEW);
+        klog("Debian : installation échouée (essai %d), voir installation-debian.txt", fails + 1);
+        return false;
+    }
+    sys_unlink("/.titan/debian.echec");
+    /* l'ancien espace des applications (Alpine, Flatpak) : rangé dans Debian, effacé en tâche de
+     * fond au premier lancement (le profil de Google Chrome est récupéré) */
+    mkdirs(DEB_NEW "/var/lib/titanos");
+    if (path_exists("/.titan/upper")) sys_rename("/.titan/upper", DEB_NEW "/var/lib/titanos/ancien");
+    if (path_exists("/.titan/work")) sys_rename("/.titan/work", DEB_NEW "/var/lib/titanos/ancien-travail");
+    if (path_exists(DEB_ROOT)) { sys_rename(DEB_ROOT, "/.titan/debian.vieux"); sh_run("rm -rf /.titan/debian.vieux"); }
+    ok = sys_rename(DEB_NEW, DEB_ROOT) == 0;
+    snprintf(cmd, sizeof cmd, "rm -f /.titan/DEBIAN.TXZ /.titan/DEBS.TAR; sync");
+    sh_run(cmd);
+    klog("Debian : base installée%s", ok ? "" : " mais pas renommée");
+    sayp(100, "Debian est installé.");
+    return ok && debian_ready();
+}
+
+/* true : la base Debian est prête, le démarrage continue dans Debian */
+static bool debian_stage(void) {
+    if (no_debian || cmdline_has("titanos.nodebian")) return false;
+    /* le bureau n'a pas démarré dans Debian (titanos-secours.service) : pause jusqu'à la
+     * prochaine version de TitanOs */
+    char pause[16];
+    if (read_file("/media/titanos/.titanos/debian-en-pause", pause, sizeof pause) > 0) {
+        if (atoi(pause) == TITANOS_BUILD) {
+            tell("WLe bureau n'a pas démarré dans Debian : TitanOs s'est ouvert sans Debian (journal-debian.txt sur la clé).\n");
+            return false;
+        }
+        sys_unlink("/media/titanos/.titanos/debian-en-pause");
+    }
+    if (!mount_apps(say)) return false;
+    if (debian_ready()) return true;
+    char txz[96], debs[96];
+    if (!debian_file("DEBIAN.TXZ", txz, sizeof txz) || !debian_file("DEBS.TAR", debs, sizeof debs)) return false;
+    if (debian_install(txz, debs)) return true;
+    tell("WL'installation de Debian n'a pas abouti : TitanOs s'ouvre sans Debian (rapport : installation-debian.txt sur la clé).\n");
+    return false;
+}
+
+/* mode hébergé : la clé a été montée par le premier démarrage (init), puis déplacée dans Debian */
+static bool key_from_mounts(void) {
+    static char m[32768];
+    if (read_file("/proc/mounts", m, sizeof m) <= 0) return false;
+    for (char *l = m; l && *l; l = strchr(l, '\n') ? strchr(l, '\n') + 1 : NULL) {
+        char dev[64], mnt[64];
+        int i = 0;
+        while (l[i] && l[i] != ' ' && i < 63) { dev[i] = l[i]; i++; }
+        dev[i] = 0;
+        if (l[i] != ' ') continue;
+        const char *q = l + i + 1;
+        int j = 0;
+        while (q[j] && q[j] != ' ' && j < 63) { mnt[j] = q[j]; j++; }
+        mnt[j] = 0;
+        if (!strcmp(mnt, "/media/titanos") && str_starts(dev, "/dev/")) { strlcpy(key_dev, dev + 5, sizeof key_dev); return true; }
+    }
+    return false;
+}
+
+static void hosted_worker(void) {
+    say("Démarrage de Debian…");
+    module_load("nouveau");                 /* déjà chargé par le premier démarrage, normalement */
+    tell("G\n");
+    say("Ouverture de vos fichiers…");
+    bool on_key = false;
+    for (int i = 0; i < 40 && !(on_key = key_from_mounts()); i++) sleep_ms(100);
+    if (!on_key) on_key = mount_key();
+    if (on_key) {
+        start_journal();
+        char m[160], where[96];
+        storage_label(where, sizeof where);
+        snprintf(m, sizeof m, "K%s · Debian\n", where);
+        tell(m);
+    }
+    say("Ouverture de la session…");
+    tell("D\n");
+}
+
 static void boot_worker(int out) {
     boot_out = out;
+    if (g_hosted) { hosted_worker(); return; }
     say("Démarrage du noyau Linux…");
     if (modules_coldplug(true) > 0) tell("G\n");             /* carte graphique d'abord */
     say("Pilotes des périphériques…");
@@ -345,6 +641,12 @@ static void boot_worker(int out) {
     if (on_key) {
         start_journal();
         say("Ouverture de vos fichiers…");
+        if (debian_stage()) {                /* base Debian prête : systemd prend le relais */
+            say("Ouverture de Debian…");
+            tell("R\n");
+            tell("D\n");
+            return;
+        }
         bool apps = setup_apps(say);
         char m[160];
         char where[96];
@@ -389,12 +691,13 @@ static void prepare_home(bool on_key, const char *storage) {
     if (first) {
         char p[256];
         snprintf(p, sizeof p, "%s/Bienvenue.txt", home);
-        const char *t = "Bienvenue dans TitanOs (bêta 32) !\n\n"
-                        "TitanOs tourne sur le noyau Linux : Linux fournit les pilotes (écran, clavier,\n"
-                        "USB, Wi-Fi, son...), et tout le reste est écrit pour TitanOs.\n\n"
+        const char *t = "Bienvenue dans TitanOs !\n\n"
+                        "TitanOs tourne sur le noyau Linux et sur une base Debian : Linux fournit les\n"
+                        "pilotes (écran, clavier, USB, Wi-Fi, son...), Debian les programmes, et le\n"
+                        "bureau est celui de TitanOs.\n\n"
                         "Vos fichiers sont gardés sur la clé USB, dans le dossier Utilisateur.\n"
-                        "Dans le Terminal : « aide » liste les commandes, et « sudo apk add nom »\n"
-                        "installe une application Linux (par exemple : sudo apk add htop).\n";
+                        "Dans le Terminal : « aide » liste les commandes, et « apt install nom »\n"
+                        "installe une application Linux (par exemple : apt install htop).\n";
         plat_writefile(p, t, strlen(t));
     }
 }
@@ -419,11 +722,13 @@ static void add_line(const char *file, const char *prefix, const char *line) {
 }
 
 static void ensure_user(const char *home) {
-    add_line("/etc/passwd", "titan:", "titan:x:1000:1000:Titan:/home/titan:/bin/sh\n");
-    add_line("/etc/group", "titan:", "titan:x:1000:\n");
-    add_line("/etc/group", "wheel:", "wheel:x:10:titan\n");
-    add_line("/etc/group", "audio:", "audio:x:18:titan\n");
-    add_line("/etc/group", "video:", "video:x:27:titan\n");
+    if (!g_hosted) {
+        add_line("/etc/passwd", "titan:", "titan:x:1000:1000:Titan:/home/titan:/bin/sh\n");
+        add_line("/etc/group", "titan:", "titan:x:1000:\n");
+        add_line("/etc/group", "wheel:", "wheel:x:10:titan\n");
+        add_line("/etc/group", "audio:", "audio:x:18:titan\n");
+        add_line("/etc/group", "video:", "video:x:27:titan\n");
+    }
     mkdirs("/home/titan");
     sc3(__NR_chown, (long)"/home/titan", 1000, 1000);
     sc2(__NR_chmod, (long)"/home/titan", 0755);
@@ -491,6 +796,23 @@ static void crash_guard(void) {
  * servent plus. Les mises à jour de TitanOs réécrivent les fichiers du système à leur place
  * (tailles fixes) : aucune ancienne version ne s'accumule sur le disque. */
 static void cleanup_start(void) {
+    /* Debian : cache d'apt, et l'ancien espace des applications (après en avoir repris le
+     * profil de Google Chrome) */
+    static const char hosted[] =
+        "A=/var/lib/titanos/ancien; C=$A/home/titan/.var/app/com.google.Chrome/config/google-chrome;"
+        " if [ -d \"$C\" ] && [ ! -e /home/titan/.config/google-chrome ]; then mkdir -p /home/titan/.config;"
+        " mv \"$C\" /home/titan/.config/google-chrome && chown -R titan:titan /home/titan/.config;"
+        " echo '<6>titanos: profil de Google Chrome repris' > /dev/kmsg; fi;"
+        " f=0; for d in /var/lib/titanos/ancien /var/lib/titanos/ancien-travail /var/cache/apt/archives /tmp/maj; do"
+        " [ -d \"$d\" ] || continue; k=$(du -sk \"$d\" 2>/dev/null | cut -f1); f=$((f + ${k:-0})); done;"
+        " nice -n 19 rm -rf /var/lib/titanos/ancien /var/lib/titanos/ancien-travail /tmp/maj 2>/dev/null;"
+        " apt-get clean 2>/dev/null; rm -f /media/titanos/*.tmp /media/titanos/.titanos/*.tmp 2>/dev/null;"
+        " echo \"<6>titanos: nettoyage : $((f / 1024)) Mo liberes\" > /dev/kmsg";
+    if (g_hosted) {
+        char *argv[] = { "/bin/sh", "-c", (char *)hosted, NULL };
+        spawn_quiet(argv);
+        return;
+    }
     static const char script[] =
         "f=0; for d in /tmp/maj /var/cache/apk /root/.config/chromium/Crash\\ Reports/completed; do"
         " [ -d \"$d\" ] || continue; k=$(du -sk \"$d\" 2>/dev/null | cut -f1); f=$((f + ${k:-0})); rm -rf \"$d\"/* 2>/dev/null; done;"
@@ -510,6 +832,15 @@ static void machine_id(void) {
     hex[32] = '\n';
     hex[33] = 0;
     write_file("/etc/machine-id", hex);
+}
+
+/* Debian : les messages de NetworkManager rejoignent le journal du noyau, pour la console réseau */
+static void netlog_forward(void) {
+    static const char script[] =
+        "journalctl -f -n 0 -o cat -u NetworkManager -u wpa_supplicant 2>/dev/null |"
+        " while IFS= read -r l; do printf '<6>NetworkManager: %s\\n' \"$l\" > /dev/kmsg; done";
+    char *argv[] = { "/bin/sh", "-c", (char *)script, NULL };
+    spawn_quiet(argv);
 }
 
 static int session_main(void) {
@@ -534,12 +865,13 @@ static int session_main(void) {
     bool hold = cmdline_has("titanos.boot=bios") && !strcmp(display_driver(), "simpledrm");
     uint64_t hold_until = plat_ms() + 8000;
     core_hold(hold);
-    core_splash("Démarrage du noyau Linux…", 0);
+    core_splash(g_hosted ? "Démarrage de Debian…" : "Démarrage du noyau Linux…", -1);
 
     /* le travail de démarrage se fait à côté ; ici, les crêtes s'animent */
     int p[2];
     char storage[96] = "Clé USB TITANOS";
-    bool on_key = false;
+    bool on_key = false, to_debian = false;
+    static char warn[200];                   /* message à montrer une fois le bureau ouvert */
     if (sys_pipe2(p, O_CLOEXEC) == 0) {
         int pid = sys_fork();
         if (pid == 0) { sys_close(p[0]); boot_worker(p[1]); sys_exit(0); }
@@ -558,7 +890,10 @@ static int session_main(void) {
             char *nl;
             while ((nl = strchr(buf, '\n'))) {
                 *nl = 0;
-                if (buf[0] == 'S') core_splash(buf + 1, 0);
+                if (buf[0] == 'S') core_splash(buf + 1, -1);
+                else if (buf[0] == 'P') { char *sp = strchr(buf, ' '); core_splash(sp ? sp + 1 : "", atoi(buf + 1)); }
+                else if (buf[0] == 'R') to_debian = true;
+                else if (buf[0] == 'W') strlcpy(warn, buf + 1, sizeof warn);
                 else if (buf[0] == 'G') { upgrade_display(); if (strcmp(display_driver(), "simpledrm")) { hold = false; core_hold(false); } }
                 else if (buf[0] == 'K') { on_key = true; strlcpy(storage, buf + 1, sizeof storage); }
                 else if (buf[0] == 'D') done = true;
@@ -572,6 +907,11 @@ static int session_main(void) {
         sys_close(p[0]);
         if (pid > 0) { int st; sys_wait4(pid, &st, 0); }
     }
+    if (to_debian) {                         /* init bascule vers Debian : systemd relancera le bureau */
+        core_splash("Ouverture de Debian…", -1);
+        core_frame();
+        return SESSION_TO_DEBIAN;
+    }
     upgrade_display();
     core_hold(false);
     prepare_home(on_key, storage);
@@ -579,15 +919,17 @@ static int session_main(void) {
     settings_load();
     if (g_set.brightness >= 0) plat_brightness(g_set.brightness);
     audio_start();
-    machine_id();
+    if (!g_hosted) machine_id();
     hw_start();                              /* Wi-Fi et batterie : processus séparé */
-    net_autostart();
+    if (!g_hosted) net_autostart();          /* Debian : NetworkManager allume les cartes */
+    else netlog_forward();
     diag_key = on_key ? "montée" : "introuvable";
     module_load("evdev");                    /* au cas où le processus de démarrage aurait échoué */
     module_load("psmouse");
     input_scan();
     core_start();
     if (!on_key) wm_toast("Clé TITANOS introuvable : vos fichiers ne seront pas conservés.");
+    else if (warn[0]) wm_toast(warn);
 
     /* périphériques branchés ou retirés : signalés par le noyau, plus besoin de tout
      * réexaminer toutes les secondes (un examen de secours reste fait toutes les 10 s) */
@@ -639,7 +981,7 @@ static int session_main(void) {
         plat_tick();
         uint64_t now = plat_ms();
         if (ev_in || now >= next_scan) { next_scan = now + 10000; input_scan(); }
-        if (ev_net || now >= next_net) { next_net = now + 10000; net_autostart(); }
+        if (!g_hosted && (ev_net || now >= next_net)) { next_net = now + 10000; net_autostart(); }
         if (ev_blk || now >= next_vol) { next_vol = now + 10000; volumes_poll(); }
     }
 }
@@ -721,6 +1063,64 @@ static void setup_zram(void) {
     if (run_wait(mk) == 0 && run_wait(on) == 0) klog("mémoire compressée (zram) : %ld Mo", kb / 2048);
 }
 
+/* copie un fichier (le programme de TitanOs dans Debian) s'il a changé */
+static bool copy_file(const char *src, const char *dst, int mode) {
+    char *a = NULL, *b = NULL;
+    size_t na = 0, nb = 0;
+    if (plat_readfile(src, &a, &na) != 0) return false;
+    bool same = plat_readfile(dst, &b, &nb) == 0 && na == nb && !memcmp(a, b, na);
+    free(b);
+    bool ok = true;
+    if (!same) {
+        char tmp[200], dir[200];
+        snprintf(tmp, sizeof tmp, "%s.tmp", dst);
+        strlcpy(dir, dst, sizeof dir);
+        char *sl = strrchr(dir, '/');
+        if (sl) { *sl = 0; mkdirs(dir); }
+        int fd = sys_open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0700);
+        ok = fd >= 0 && write_all(fd, (const uint8_t *)a, (long)na);
+        if (fd >= 0) { sc1(__NR_fsync, fd); sys_close(fd); }
+        ok = ok && sys_rename(tmp, dst) == 0;
+    }
+    free(a);
+    sc3(__NR_chown, (long)dst, 0, 0);
+    sc2(__NR_chmod, (long)dst, mode);
+    return ok;
+}
+
+/* Bascule vers la base Debian : /.titan/debian devient la racine et systemd démarre. Ne
+ * revient qu'en cas d'échec avant le déplacement des montages. */
+static void switch_debian(void) {
+    mkdirs("/newroot");
+    if (sys_mount(DEB_ROOT, "/newroot", NULL, 4096 /* MS_BIND */, NULL) != 0) { klog("Debian : racine introuvable"); return; }
+    if (!copy_file("/init", "/newroot/usr/lib/titanos/titanos", 0755) || !copy_file("/init", "/newroot/usr/local/bin/sudo", 04755)) {
+        klog("Debian : programme de TitanOs non copié");
+        sys_umount2("/newroot", 2);
+        return;
+    }
+    char ver[16];
+    snprintf(ver, sizeof ver, "%d\n", TITANOS_BUILD);
+    write_file("/newroot/usr/lib/titanos/version", ver);          /* pour titanos-secours.service */
+    sys_kill(-1, 15);                        /* processus du premier démarrage (journal...) */
+    sleep_ms(150);
+    sys_kill(-1, 9);
+    int st;
+    while (sys_wait4(-1, &st, WNOHANG_) > 0) {}
+    sys_sync();
+    klog("TitanOs " TITANOS_VERSION " : bascule vers Debian (systemd)");
+    static const char *const mv[] = { "/media/titanos", "/run", "/sys", "/proc", "/dev" };
+    for (int i = 0; i < countof(mv); i++) {
+        char t[64];
+        snprintf(t, sizeof t, "/newroot%s", mv[i]);
+        mkdirs(t);
+        sys_mount(mv[i], t, NULL, 8192 /* MS_MOVE */, NULL);
+    }
+    static char *env[] = { "HOME=/", "TERM=linux", "PATH=/usr/sbin:/usr/bin:/sbin:/bin", NULL };
+    char *argv[] = { "switch_root", "/newroot", "/sbin/init", NULL };
+    sys_execve("/bin/busybox", argv, env);
+    sys_exit(1);                             /* plus de /dev ni de /proc : rien d'autre à faire */
+}
+
 static int init_main(void) {
     sys_mount("proc", "/proc", "proc", 0, NULL);
     sys_mount("sysfs", "/sys", "sysfs", 0, NULL);
@@ -765,6 +1165,12 @@ static int init_main(void) {
             if (pid <= 0) break;
             if (pid == shell_pid) { shell_pid = -1; session = start_session(); continue; }
             if (pid != session) continue;
+            if (!(st & 0x7F) && ((st >> 8) & 0xFF) == SESSION_TO_DEBIAN && !no_debian) {
+                switch_debian();
+                no_debian = true;                /* bascule impossible : on reste sur le système autonome */
+                session = start_session();
+                continue;
+            }
             /* la session s'est arrêtée : on la relance, sauf si elle plante en boucle */
             struct timespec ts;
             sys_clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -799,5 +1205,6 @@ int start_c(long *sp) {
         sys_exit(1);
     }
     if (sys_getpid() == 1) sys_exit(init_main());
+    g_hosted = argc > 1 && !strcmp(argv[1], "--session");
     sys_exit(session_main());
 }

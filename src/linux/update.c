@@ -278,7 +278,9 @@ static bool apply_system(const char *root, const char *dev, char *const src[NSYS
 
 /* paquet titanos-maj.tar.gz (téléchargé ou sur une clé) : vérifié puis installé sur le
  * TitanOs en cours */
+static bool upd_ok;                    /* le dernier paquet a été installé */
 static void install_package_(const char *tgz, bool quiet) {
+    upd_ok = false;
     char *tar[] = { "/bin/busybox", "tar", "-xzf", (char *)tgz, "-C", WORK, NULL };
     char *sum[] = { "/bin/busybox", "sh", "-c", "cd " WORK " && /bin/busybox sha256sum -c -s SHA256SUMS", NULL };
     say(UPD_INSTALLING, 0, "Vérification du paquet…");
@@ -300,6 +302,7 @@ static void install_package_(const char *tgz, bool quiet) {
     free(mbr);
     if (!ok) return;
     klog("mise à jour : bêta %d installée", build);
+    upd_ok = true;
     say(UPD_DONE, 100, "Bêta %d installée : redémarrez pour l'utiliser.", build);
 }
 
@@ -309,6 +312,135 @@ static void install_package(const char *tgz, bool quiet) {
     install_package_(tgz, quiet);
     char *rm[] = { "/bin/busybox", "rm", "-rf", WORK, NULL };
     run(rm);
+}
+
+/* ================================================================== */
+/* Base Debian                                                          */
+/* ================================================================== */
+/* Un TitanOs autonome (installé avant la base Debian) télécharge ses deux archives dans
+ * l'espace des applications, au contrôle des mises à jour : elle s'installe au redémarrage. */
+static bool debian_missing(void) {
+    if (g_hosted || !path_exists("/.titan/upper") || path_exists("/.titan/debian/etc/titanos-ready")) return false;
+    if (path_exists("/media/titanos/TITANOS/DEBIAN.TXZ") && path_exists("/media/titanos/TITANOS/DEBS.TAR")) return false;
+    return !(path_exists("/.titan/DEBIAN.TXZ") && path_exists("/.titan/DEBS.TAR"));
+}
+
+static long remote_size(const char *name) {
+    char script[400];
+    snprintf(script, sizeof script, "/usr/bin/curl -fsSIL --max-time 30 'https://github.com/" REPO "/releases/latest/download/%s'"
+             " | tr -d '\\r' | grep -i '^content-length:' | tail -n 1 | cut -d' ' -f2 > " WORK "/taille", name);
+    char *argv[] = { "/bin/busybox", "sh", "-c", script, NULL };
+    char t[32] = "";
+    if (run(argv) != 0 || read_file(WORK "/taille", t, sizeof t) <= 0) return 0;
+    return strtol(t, NULL, 10);
+}
+
+static void debian_fetch(bool quiet) {
+    struct { long type, bsize; unsigned long blocks, bfree, bavail, files, ffree; int fsid[2]; long namelen, frsize, flags, spare[4]; } fs;
+    if (sc2(__NR_statfs, (long)"/.titan", (long)&fs) == 0 && (long)(fs.bavail * (unsigned long)fs.bsize >> 20) < 2200) {
+        klog("base Debian : pas assez de place dans l'espace des applications");
+        say(quiet ? UPD_UPTODATE : UPD_ERROR, -1, "Base Debian : il faut 2,2 Go libres dans l'espace des applications.");
+        return;
+    }
+    mkdirs(WORK);
+    static const char *const names[2] = { "DEBIAN.TXZ", "DEBS.TAR" };
+    long size[2], total = 0, before = 0;
+    for (int i = 0; i < 2; i++) total += size[i] = remote_size(names[i]);
+    klog("base Debian : téléchargement (%ld Mo)", total >> 20);
+    for (int i = 0; i < 2; i++) {
+        char part[64], dst[64], url[160];
+        snprintf(part, sizeof part, "/.titan/%s.part", names[i]);
+        snprintf(dst, sizeof dst, "/.titan/%s", names[i]);
+        snprintf(url, sizeof url, "https://github.com/" REPO "/releases/latest/download/%s", names[i]);
+        char *get[] = { "/usr/bin/curl", "-fsSL", "--retry", "3", "--max-time", "7200", "-o", part, url, NULL };
+        int pid = sys_fork();
+        if (pid == 0) {
+            int nul = sys_open("/dev/null", O_RDWR, 0);
+            if (nul >= 0) { sys_dup2(nul, 0); sys_dup2(nul, 1); sys_dup2(nul, 2); }
+            sys_execve(get[0], get, g_envp);
+            sys_exit(127);
+        }
+        int st = -1;
+        for (;;) {
+            if (pid <= 0 || sys_wait4(pid, &st, WNOHANG_) == pid) break;
+            long got = file_size(part);
+            if (got < 0) got = 0;
+            if (total > 0) say(UPD_DOWNLOADING, (int)MIN(99, (before + got) * 100 / total), "Téléchargement de la base Debian… %ld Mo sur %ld",
+                               (before + got) >> 20, total >> 20);
+            else say(UPD_DOWNLOADING, -1, "Téléchargement de la base Debian… %ld Mo", (before + got) >> 20);
+            sleep_ms(500);
+        }
+        if (st != 0 || (size[i] > 0 && file_size(part) != size[i]) || sys_rename(part, dst) != 0) {
+            sys_unlink(part);
+            klog("base Debian : téléchargement de %s interrompu", names[i]);
+            say(quiet ? UPD_IDLE : UPD_ERROR, -1, "Le téléchargement de la base Debian a échoué : il reprendra plus tard.");
+            return;
+        }
+        before += size[i];
+    }
+    sys_sync();
+    klog("base Debian : téléchargée");
+    say(UPD_DONE, 100, "Base Debian téléchargée : redémarrez pour l'installer (quelques minutes, une seule fois).");
+}
+
+/* Debian : mise à jour des programmes (apt), avec l'avancement d'apt (APT::Status-Fd) */
+static void apt_upgrade(void) {
+    say(UPD_INSTALLING, -1, "Mise à jour de la liste des programmes Debian…");
+    char *upd[] = { "/usr/bin/apt-get", "-q", "-o", "DPkg::Lock::Timeout=120", "update", NULL };
+    if (run(upd) != 0) { say(UPD_ERROR, -1, "Les dépôts Debian ne répondent pas : réessayez plus tard."); return; }
+    int p[2];
+    if (sys_pipe2(p, O_CLOEXEC) < 0) return;
+    int pid = sys_fork();
+    if (pid == 0) {
+        int nul = sys_open("/dev/null", O_RDWR, 0);
+        if (nul >= 0) { sys_dup2(nul, 0); sys_dup2(nul, 2); }
+        sys_dup2(p[1], 1);
+        static char *env[] = { "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/root", "LANG=C.UTF-8",
+                               "DEBIAN_FRONTEND=noninteractive", "APT_LISTCHANGES_FRONTEND=none", NULL };
+        char *argv[] = { "/usr/bin/apt-get", "-y", "-q", "-o", "APT::Status-Fd=1", "-o", "Dpkg::Use-Pty=0", "-o", "DPkg::Lock::Timeout=300",
+                         "-o", "Dpkg::Options::=--force-confold", "full-upgrade", NULL };
+        sys_execve(argv[0], argv, env);
+        sys_exit(127);
+    }
+    sys_close(p[1]);
+    char buf[2048];
+    int len = 0, pkgs = 0;
+    char lastpk[64] = "";
+    for (;;) {
+        long r = pid > 0 ? sys_read(p[0], buf + len, sizeof buf - 1 - (size_t)len) : 0;
+        if (r <= 0) break;
+        len += (int)r;
+        buf[len] = 0;
+        char *nl;
+        while ((nl = strchr(buf, '\n'))) {
+            *nl = 0;
+            bool dl = str_starts(buf, "dlstatus:"), pm = str_starts(buf, "pmstatus:");
+            if (dl || pm) {
+                char pk[64];
+                int k = 0;
+                for (const char *q = buf + 9; *q && *q != ':' && k < 63; q++) pk[k++] = *q;
+                pk[k] = 0;
+                if (pm && strcmp(pk, lastpk)) { pkgs++; strlcpy(lastpk, pk, sizeof lastpk); }
+                const char *a = strchr(buf + 9, ':');
+                int pc = a ? atoi(a + 1) : 0;
+                say(UPD_INSTALLING, dl ? pc / 2 : 50 + pc / 2, dl ? "Téléchargement des mises à jour Debian… %s" : "Installation des mises à jour Debian… %s", pk);
+            }
+            int rest = len - (int)(nl + 1 - buf);
+            memmove(buf, nl + 1, (size_t)rest + 1);
+            len = rest;
+        }
+        if (len >= (int)sizeof buf - 1) len = 0;
+    }
+    sys_close(p[0]);
+    int st = -1;
+    if (pid > 0) sys_wait4(pid, &st, 0);
+    char *clean[] = { "/usr/bin/apt-get", "clean", NULL };
+    run(clean);
+    sys_sync();
+    if (st != 0) { say(UPD_ERROR, -1, "La mise à jour des programmes Debian a échoué (Terminal : sudo apt full-upgrade)."); return; }
+    klog("mise à jour : programmes Debian à jour (%d paquets)", pkgs / 2);
+    if (pkgs) say(UPD_DONE, 100, "TitanOs est à jour, et les programmes Debian ont été mis à jour.");
+    else say(UPD_UPTODATE, -1, "TitanOs et les programmes Debian sont à jour (" TITANOS_VERSION ").");
 }
 
 static void update_main(void *arg) {
@@ -330,7 +462,12 @@ static void update_main(void *arg) {
     read_file(WORK "/VERSION.latest", vb, sizeof vb);
     int build = vb[0] >= '0' && vb[0] <= '9' ? atoi(vb) : -1;
     if (build < 0) { say(quiet ? UPD_IDLE : UPD_ERROR, -1, "Réponse de GitHub incomprise."); return; }
-    if (build <= TITANOS_BUILD) { say(UPD_UPTODATE, -1, "TitanOs est à jour (" TITANOS_VERSION ")."); return; }
+    if (build <= TITANOS_BUILD) {
+        if (debian_missing()) { debian_fetch(quiet); return; }
+        if (g_hosted && !quiet) { apt_upgrade(); return; }
+        say(UPD_UPTODATE, -1, "TitanOs est à jour (" TITANOS_VERSION ").");
+        return;
+    }
     klog("mise à jour : bêta %d disponible", build);
     /* taille du paquet, pour une barre de progression exacte */
     long total = 0;
@@ -363,6 +500,7 @@ static void update_main(void *arg) {
     }
     if (st != 0) { say(quiet ? UPD_IDLE : UPD_ERROR, -1, "Le téléchargement a échoué."); return; }
     install_package(WORK "/maj.tar.gz", quiet);
+    if (upd_ok && debian_missing()) debian_fetch(quiet);     /* la base Debian, dans la foulée */
 }
 
 /* ---- mise à jour depuis une clé USB : fichier titanos-maj.tar.gz posé sur la clé ---- */

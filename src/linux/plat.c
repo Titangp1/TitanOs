@@ -156,12 +156,38 @@ bool plat_exists(const char *path, bool *dir) {
 
 /* ---------------- processus : terminal et commandes ---------------- */
 static bool user_ok(void) { return path_exists("/home/titan"); }
+
+/* groupes du compte titan, d'après /etc/group (son groupe d'abord) */
+int plat_user_groups(uint32_t *g, int max) {
+    static char buf[16384];
+    int n = 0;
+    g[n++] = 1000;
+    if (read_file("/etc/group", buf, sizeof buf) <= 0) return n;
+    for (char *l = buf; l && *l && n < max; ) {
+        char *nl = strchr(l, '\n');
+        if (nl) *nl = 0;
+        /* nom:x:gid:membre1,membre2 */
+        char *c1 = strchr(l, ':'), *c2 = c1 ? strchr(c1 + 1, ':') : NULL, *c3 = c2 ? strchr(c2 + 1, ':') : NULL;
+        if (c3) {
+            uint32_t gid = (uint32_t)atoi(c2 + 1);
+            for (char *m = c3 + 1; m && *m; ) {
+                char *cm = strchr(m, ',');
+                size_t len = cm ? (size_t)(cm - m) : strlen(m);
+                if (len == 5 && !strncmp(m, "titan", 5) && gid != 1000) { g[n++] = gid; break; }
+                m = cm ? cm + 1 : NULL;
+            }
+        }
+        l = nl ? nl + 1 : NULL;
+    }
+    return n;
+}
 static char *const *make_env(void) {
     static char henv[300];
     static char *env[12];
     snprintf(henv, sizeof henv, "HOME=%s", user_ok() ? "/home/titan" : home_dir);
     int k = 0;
-    env[k++] = "PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
+    env[k++] = g_hosted ? "PATH=/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games:/usr/sbin:/sbin"
+                        : "PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
     env[k++] = henv;
     env[k++] = "TERM=xterm-256color";
     env[k++] = "USER=titan";
@@ -217,8 +243,9 @@ int plat_pty_open(int cols, int rows) {
         /* le Terminal n'est pas root : compte titan (uid 1000), sudo pour l'administration */
         if (user_ok()) {
             sc3(__NR_fchown, s, 1000, 5 /* tty */);
-            static const uint32_t groups[] = { 1000, 10 /* wheel */, 18 /* audio */, 27 /* video */ };
-            sc2(__NR_setgroups, countof(groups), (long)groups);
+            uint32_t groups[32];
+            int ng = plat_user_groups(groups, 32);
+            sc2(__NR_setgroups, ng, (long)groups);
             if (sc3(__NR_setresgid, 1000, 1000, 1000) != 0 || sc3(__NR_setresuid, 1000, 1000, 1000) != 0) sys_exit(126);
         }
         sys_dup2(s, 0); sys_dup2(s, 1); sys_dup2(s, 2);
@@ -473,7 +500,8 @@ bool plat_kill(int pid) { return pid > 1 && pid != sys_getpid() && sys_kill(pid,
 static int kmsg_fd = -1;
 static bool net_line(const char *m) {
     static const char *const keys[] = { "titanos: réseau", "titanos: Wi-Fi", "titanos: wpa", "titanos: diag", "wlan", "iwlwifi",
-                                        "cfg80211", "ieee80211", "sky2", "eth0", "eth1", "usb0", "rndis", "cdc_ncm", "cdc_ether", "udhcpc" };
+                                        "cfg80211", "ieee80211", "sky2", "eth0", "eth1", "usb0", "rndis", "cdc_ncm", "cdc_ether", "udhcpc",
+                                        "NetworkManager", "enp", "wlp" };
     for (int i = 0; i < countof(keys); i++) if (strstr(m, keys[i])) return true;
     return false;
 }
@@ -575,8 +603,23 @@ int plat_netifs(netif_t *list, int max) {
 /* ---------------- alimentation, luminosité, son ---------------- */
 void plat_sync(void) { sys_sync(); }
 
+/* Debian : systemd arrête les services, démonte les disques et éteint */
+static bool systemctl(const char *verb) {
+    if (!g_hosted) return false;
+    int pid = sys_fork();
+    if (pid == 0) {
+        char *argv[] = { "/usr/bin/systemctl", (char *)verb, NULL };
+        sys_execve(argv[0], argv, g_envp);
+        sys_exit(127);
+    }
+    int st = -1;
+    if (pid > 0) sys_wait4(pid, &st, 0);
+    return st == 0;
+}
+
 void plat_power(int action) {
     sys_sync();
+    if (systemctl(action ? "reboot" : "poweroff")) { for (;;) sleep_ms(1000); }
     if (sys_umount2("/media/titanos", 0) != 0) sys_umount2("/media/titanos", 2 /* MNT_DETACH */);
     sys_sync();
     sleep_ms(300);
@@ -609,6 +652,7 @@ void plat_random(void *buf, size_t n) {
 
 void plat_suspend(void) {
     sys_sync();
+    if (systemctl("suspend")) return;
     if (write_file("/sys/power/state", "mem") != 0) write_file("/sys/power/state", "freeze");
 }
 
@@ -712,3 +756,5 @@ static int hwmon_temp(const char *chip) {
     for_each_dir("/sys/class/hwmon", hwmon_cb, &c);
     return c.temp;
 }
+
+bool plat_debian(void) { return g_hosted; }

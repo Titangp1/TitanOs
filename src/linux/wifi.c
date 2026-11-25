@@ -856,7 +856,13 @@ static void helper_main(int out, int in) {
             long r = sys_read(in, &c, sizeof c);
             if (r <= 0) sys_exit(0);                    /* le bureau s'est arrêté */
             if (r == sizeof c) {
-                if (c.op == OP_SCAN) w_scan();
+                if (g_hosted) {                         /* Debian : NetworkManager */
+                    if (c.op == OP_SCAN) nm_scan();
+                    else if (c.op == OP_CONNECT) nm_connect(c.ssid, c.psk[0] ? c.psk : NULL, NULL);
+                    else if (c.op == OP_FORGET) nm_forget(c.ssid);
+                    else if (c.op == OP_CONNECT_EAP) nm_connect(c.ssid, c.psk, c.id);
+                }
+                else if (c.op == OP_SCAN) w_scan();
                 else if (c.op == OP_CONNECT) w_connect(c.ssid, c.psk[0] ? c.psk : NULL);
                 else if (c.op == OP_FORGET) w_forget(c.ssid);
                 else if (c.op == OP_CONNECT_EAP) w_connect_eap(c.ssid, c.id, c.psk);
@@ -865,8 +871,9 @@ static void helper_main(int out, int in) {
             }
             continue;
         }
-        int st;
-        while (sys_wait4(-1, &st, WNOHANG_) > 0) {}      /* wpa_supplicant -B laisse un processus fini */
+        int st, rp;
+        while ((rp = sys_wait4(-1, &st, WNOHANG_)) > 0)  /* wpa_supplicant -B laisse un processus fini */
+            if (g_hosted) nm_child(rp, st);
         snap_t s;
         memset(&s, 0, sizeof s);
         /* la batterie est lue par l'ACPI : sur certains portables (VAIO), chaque lecture
@@ -877,6 +884,25 @@ static void helper_main(int out, int in) {
         static int gov = -1;                 /* 1 : performance (secteur), 0 : schedutil (batterie) */
         int want = s.bat.present && !s.bat.ac ? 0 : 1;
         if (want != gov) { gov = want; for_each_dir("/sys/devices/system/cpu", gov_cb, (void *)(want ? "performance" : "schedutil")); }
+        if (g_hosted) {                                 /* Debian : NetworkManager fait tout le réseau */
+            nm_start();
+            for_each_dir("/sys/class/rfkill", rfkill_cb, NULL);
+            s.wstate = nm_state(s.wssid, sizeof s.wssid, &s.wsignal);
+            bool hard = false;
+            for_each_dir("/sys/class/rfkill", hard_cb, &hard);
+            if (hard && s.wstate != WIFI_CONNECTED) s.wstate = WIFI_BLOCKED;
+            s.nnets = nm_list(s.nets, SNAP_NETS);
+            strlcpy(s.wlast, nm_last(), sizeof s.wlast);
+            static int nm_last_state = -9;
+            if (s.wstate != nm_last_state) {
+                static const char *const nm[] = { "aucune carte", "non connecté", "connexion", "connecté", "interrupteur sur OFF", "mot de passe refusé" };
+                klog("Wi-Fi : %s%s%s (%d réseaux visibles)", nm[s.wstate + 1], s.wssid[0] ? " - " : "", s.wssid, s.nnets);
+                nm_last_state = s.wstate;
+            }
+            sys_write(out, &s, sizeof s);
+            next = plat_ms() + (s.wstate == WIFI_CONNECTING ? 1000 : 2500);
+            continue;
+        }
         wifi_start();
         s.wstate = ctrl >= 0 ? w_status(s.wssid, sizeof s.wssid, &s.wsignal) : WIFI_NONE;
         for_each_dir("/sys/class/rfkill", rfkill_cb, NULL);      /* l'interrupteur logiciel peut revenir */

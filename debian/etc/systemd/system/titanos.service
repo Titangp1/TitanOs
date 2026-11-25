@@ -1,0 +1,22 @@
+# TitanOs : le bureau, sur l'écran 1 (à la place de la console texte)
+# S'il ne démarre pas (6 arrêts en une minute), titanos-secours.service met Debian en pause et
+# redémarre : TitanOs s'ouvre alors sans Debian, comme avant, jusqu'à la prochaine mise à jour.
+[Unit]
+Description=Bureau TitanOs
+After=systemd-user-sessions.service systemd-logind.service
+Conflicts=getty@tty1.service
+StartLimitIntervalSec=60
+StartLimitBurst=6
+OnFailure=titanos-secours.service
+
+[Service]
+ExecStart=/usr/lib/titanos/titanos --session
+Restart=always
+RestartSec=1
+TTYPath=/dev/tty1
+StandardInput=null
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

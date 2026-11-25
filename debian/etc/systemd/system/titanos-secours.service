@@ -1,0 +1,8 @@
+# TitanOs : le bureau ne démarre pas dans Debian -> journal copié sur la clé, Debian mis en
+# pause (fichier .titanos/debian-en-pause, avec le numéro de version) et redémarrage
+[Unit]
+Description=Secours de TitanOs (bureau introuvable)
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'mkdir -p /media/titanos/.titanos; journalctl -b --no-pager > /media/titanos/journal-debian.txt 2>&1; cp /usr/lib/titanos/version /media/titanos/.titanos/debian-en-pause; sync; systemctl reboot'

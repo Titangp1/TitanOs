@@ -2,6 +2,8 @@
 #pragma once
 #include "sys.h"
 
+extern bool g_hosted;                /* bureau lancé par systemd, dans la base Debian */
+
 /* modules.c : chargement des pilotes du noyau */
 void modules_init(void);
 bool module_load(const char *name);
@@ -41,6 +43,17 @@ void hw_start(void);                 /* veilleur : Wi-Fi et batterie, hors du bu
 extern uint64_t display_us;          /* mesure du temps d envoi des images */
 void bat_read(battery_t *b);
 
+/* nm.c : Wi-Fi par NetworkManager (base Debian), utilisé par le veilleur */
+void nm_start(void);
+int  nm_state(char *ssid, int n, int *signal);
+int  nm_list(wifi_net_t *list, int max);
+void nm_scan(void);
+void nm_connect(const char *ssid, const char *psk, const char *identity);   /* identity : WPA2-Entreprise */
+void nm_forget(const char *ssid);
+bool nm_child(int pid, int status);            /* fin d'une connexion lancée en arrière-plan */
+const char *nm_last(void);
+
 /* plat.c */
+int  plat_user_groups(uint32_t *g, int max);   /* groupes du compte titan (/etc/group) */
 void plat_set_storage(const char *home, const char *config, const char *storage);
 void plat_tick(void);

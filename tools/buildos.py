@@ -352,6 +352,30 @@ def build(repo, B):
         B.run([ld_lld, "--image-base=0", "--oformat=binary", f"-Ttext=0x{addr:x}", "-e", sym, "-o", b, o])
         boot[name] = open(b, "rb").read()
 
+    print("[base Debian : installée au premier démarrage]")
+    import debian
+    drepo = debian.Repo(B.CACHE).load()
+    extra = {"setup.sh": (open(os.path.join(root, "debian", "setup.sh"), "rb").read().replace(b"\r\n", b"\n"), 0o755)}
+    for dirpath, _, names in os.walk(os.path.join(root, "debian", "etc")):
+        for n in sorted(names):
+            full = os.path.join(dirpath, n)
+            rel = "etc/" + os.path.relpath(full, os.path.join(root, "debian", "etc")).replace(os.sep, "/")
+            data = open(full, "rb").read().replace(b"\r\n", b"\n")
+            extra[rel] = (data, 0o755 if data.startswith(b"#!") else 0o644)
+    gen = os.path.join(out, "gen")
+    os.makedirs(gen, exist_ok=True)
+    stamp = os.path.join(gen, "DEBIAN.stamp")
+    key = repr(sorted((k, hashlib.sha256(v[0]).hexdigest()) for k, v in extra.items())) + kver + repr(debian.BASE) + hashlib.sha256(open(debian.__file__, "rb").read()).hexdigest()
+    if not (os.path.exists(stamp) and open(stamp).read() == key and os.path.exists(os.path.join(gen, "DEBS.TAR"))):
+        info_d = debian.build_base(drepo, kfiles, kver, extra, gen)
+        open(stamp, "w").write(key)
+        print(f"  {info_d['required']} + {info_d['base']} paquets, {info_d['modules']} fichiers de pilotes ; "
+              f"DEBIAN.TXZ {info_d['txz'] >> 20} Mo, DEBS.TAR {info_d['debs'] >> 20} Mo")
+    deb_txz = open(os.path.join(gen, "DEBIAN.TXZ"), "rb").read()
+    deb_tar = open(os.path.join(gen, "DEBS.TAR"), "rb").read()
+    big = {"DEBIAN.TXZ": deb_txz, "DEBS.TAR": deb_tar}
+    disk_mb = max(DISK_MB, ((len(deb_txz) + len(deb_tar) >> 20) + 100 + 64 + 200 + 63) // 64 * 64)
+
     print("[image disque]")
     import mkimage
     readme = ("TitanOs beta 32 - systeme d'exploitation sur base Linux\r\n\r\n"
@@ -362,14 +386,14 @@ def build(repo, B):
     img = os.path.join(out, "titanos.img")
     import bootimg
     ttc = repo.fetch("font-inter")["usr/share/fonts/inter/Inter.ttc"][1]
-    disk, s2, info = mkimage.write_images(DISK_MB, open(efi_path, "rb").read(), boot["mbr"], boot["stage2"],
+    disk, s2, info = mkimage.write_images(disk_mb, open(efi_path, "rb").read(), boot["mbr"], boot["stage2"],
                                           vmlinuz, initrd, CMDLINE, readme, bootimg.build(ttc), img,
-                                          os.path.join(out, "titanos.vhd"), version=(build_number() + "\n").encode())
+                                          os.path.join(out, "titanos.vhd"), version=(build_number() + "\n").encode(), extra=big)
     with open(os.path.join(out, "obj-boot", "stage2-final.bin"), "wb") as f:
         f.write(s2)
     write_update(out, info, s2, vmlinuz, initrd, bootimg.build(ttc))
     print(f"  noyau au secteur {info['kernel_lba']}, initramfs au secteur {info['initrd_lba']}, "
           f"chargé à {info['initrd_addr'] >> 20} Mo ; {info['free_mb']} Mo libres pour vos fichiers")
-    print(f"\nTitanOs bêta 32 est prêt :")
-    print(f"  build/titanos.img   image pour clé USB ({DISK_MB} Mo, démarre en BIOS et en UEFI)")
+    print(f"\nTitanOs bêta 33 est prêt :")
+    print(f"  build/titanos.img   image pour clé USB ({disk_mb} Mo, démarre en BIOS et en UEFI)")
     print(f"  build/titanos.vhd   disque virtuel (VirtualBox, Hyper-V génération 1)")
