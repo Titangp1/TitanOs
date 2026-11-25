@@ -91,7 +91,7 @@ Il faut 512 Mo de mémoire au minimum. Une fois TitanOs installé, les nouvelles
 | **Calculatrice** | À la souris ou au clavier. |
 | **Paramètres** | Personnalisation, écran, son, clavier et souris, réseau, date et heure, compte (mot de passe de session), système. |
 | **Système** | Machine, températures, batterie, matériel PCI/USB avec son pilote, processus. |
-| **Réseau** | Wi-Fi WPA2, WPA3, WPA2-Entreprise (identifiant et mot de passe), réseaux ouverts et masqués, mot de passe affichable, réseaux enregistrés ; câble, partage USB d'un téléphone. Le test de connexion vérifie chaque étape (adresse, box, Internet, DNS) et dit laquelle bloque. |
+| **Réseau** | Wi-Fi WPA2, WPA3, WPA2-Entreprise (identifiant et mot de passe), réseaux ouverts et masqués, mot de passe affichable, réseaux enregistrés ; câble, partage USB d'un téléphone. Le test de connexion vérifie chaque étape (adresse, box, Internet, DNS) et dit laquelle bloque. La **console réseau** montre en direct ce que font la carte, wpa_supplicant et le DHCP, erreurs expliquées en français, et s'enregistre dans un fichier. |
 | **Mises à jour** | Version installée, recherche sur GitHub, installation sur un disque ou une clé USB. |
 | **Snake**, **À propos** | |
 

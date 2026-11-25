@@ -2,6 +2,25 @@
 
 Toutes les versions sont dans les [versions publiées](../../releases). Depuis la bêta 6, TitanOs se met à jour tout seul.
 
+## Bêta 29
+
+**Connexion Wi-Fi : un vrai résultat**
+- **« Connexion à… » ne tourne plus sans fin** : le message n'était jamais remplacé. Chaque connexion est maintenant suivie jusqu'au bout. Pendant l'attente, l'étape en cours s'affiche avec les secondes : « tentative de connexion… », « associé, échange des clés… », « demande d'une adresse… ».
+- À la fin, un résultat clair :
+  - « Connecté à X · adresse 192.168.1.20 » ;
+  - « mot de passe refusé » ;
+  - « la borne ne répond pas (trop loin ?) » ;
+  - « la borne refuse la connexion » ;
+  - « connecté, mais la box ne donne pas d'adresse » ;
+  - ou, au bout de 35 s, « la connexion n'aboutit pas », avec la dernière raison connue.
+
+**Console réseau**
+- Nouveau bouton **Console** dans Réseau : tout ce que font la carte Wi-Fi, wpa_supplicant, le câble et le DHCP, en direct et heure par heure. Les erreurs sont en rouge, les réussites en vert.
+- Les événements de wpa_supplicant sont expliqués en français. Exemples : `CTRL-EVENT-SSID-TEMP-DISABLED reason=WRONG_KEY` → « mot de passe refusé » ; `reason=15` → « échange de clés expiré : mot de passe probablement faux » ; `status_code=17` → « trop d'appareils connectés ».
+- **Diagnostic complet** ajoute l'état entier du réseau : adresses, routes, DNS, état de wpa_supplicant, liaison Wi-Fi (signal, débit), pays de la radio, test d'Internet et des noms.
+- **Enregistrer** crée `Documents/console-reseau.txt`, à envoyer pour obtenir de l'aide.
+- Les messages de TitanOs ne sont plus limités par le noyau : aucun ne se perd, même quand il y en a beaucoup.
+
 ## Bêta 28
 
 **Google Chrome remplace Chromium**

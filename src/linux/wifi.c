@@ -194,6 +194,7 @@ static const char *conf_path(void) {
 
 /* dans le veilleur : prépare le Wi-Fi dès qu'une carte apparaît */
 static bool ok(const char *cmd);
+static void mon_open(void);
 
 static void wifi_start(void) {
     if (ctrl >= 0 || plat_ms() < next_try) return;
@@ -252,6 +253,7 @@ static void wifi_start(void) {
     ok("SET filter_ssids 0");
     ok("SET autoscan exponential:3:60");
     ok("SET scan_cur_freq 0");
+    mon_open();
     ok("SET sae_pwe 2");                                  /* WPA3 : les deux méthodes (téléphones récents) */
     if (path_exists("/usr/sbin/iw")) {                   /* économie d'énergie de la radio : coupée */
         int c = sys_fork();
@@ -264,6 +266,114 @@ static void wifi_start(void) {
         }
     }
     klog("Wi-Fi : %s prêt", iface);
+}
+
+/* ---- événements de wpa_supplicant (ATTACH) : chaque étape d'une connexion, et la raison
+ * d'un échec, notées dans le journal du noyau en clair (console réseau, journal-titanos.txt) */
+static int mon = -1;
+static char wlast[120];                          /* dernière étape ou erreur, pour l'application Réseau */
+
+static void mon_open(void) {
+    if (mon >= 0 || !iface[0]) return;
+    char sock[64];
+    snprintf(sock, sizeof sock, "/run/wpa_supplicant/%s", iface);
+    int fd = sys_socket(1 /* AF_UNIX */, 2 /* SOCK_DGRAM */ | O_CLOEXEC, 0);
+    if (fd < 0) return;
+    struct { uint16_t family; char path[108]; } local = { 1, { 0 } }, remote = { 1, { 0 } };
+    snprintf(local.path, sizeof local.path, "/run/titanos-wpamon-%d", sys_getpid());
+    sys_unlink(local.path);
+    strlcpy(remote.path, sock, sizeof remote.path);
+    if (sys_bind(fd, &local, sizeof local) < 0 || sc3(__NR_connect, fd, (long)&remote, sizeof remote) < 0) { sys_close(fd); return; }
+    char r[16];
+    struct pollfd p = { fd, POLLIN, 0 };
+    if (sc6(__NR_sendto, fd, (long)"ATTACH", 6, 0x40, 0, 0) < 0 || sys_poll(&p, 1, 1000) <= 0 || sys_recv(fd, r, sizeof r, 0) < 2 || r[0] != 'O') {
+        sys_close(fd);
+        return;
+    }
+    mon = fd;
+    klog("wpa : écoute des événements de la connexion Wi-Fi");
+}
+
+static const char *reason_text(int r) {
+    switch (r) {
+    case 1: return "raison non précisée";
+    case 2: return "authentification expirée";
+    case 3: return "déconnexion demandée";
+    case 4: return "inactivité";
+    case 6: case 7: return "la borne ne reconnaît pas la carte";
+    case 8: return "la carte quitte le réseau";
+    case 14: return "erreur d'intégrité (mot de passe ?)";
+    case 15: return "échange de clés expiré : mot de passe probablement faux";
+    case 16: return "clé de groupe expirée";
+    case 23: return "identifiant ou mot de passe refusé (802.1X)";
+    case 34: return "trop de pertes : signal trop faible";
+    default: return NULL;
+    }
+}
+
+/* explication en français d'un événement (NULL : pas intéressant à expliquer) */
+static const char *event_hint(const char *m, char *buf, int n) {
+    if (strstr(m, "CTRL-EVENT-SSID-TEMP-DISABLED")) {
+        if (strstr(m, "reason=WRONG_KEY")) return "mot de passe refusé";
+        if (strstr(m, "reason=EAP_AUTH_FAILED") || strstr(m, "reason=AUTH_FAILED")) return "identifiant ou mot de passe refusé";
+        if (strstr(m, "reason=CONN_FAILED")) return "la connexion échoue (signal trop faible ou borne qui refuse)";
+        return "réseau mis de côté après plusieurs échecs";
+    }
+    if (strstr(m, "CTRL-EVENT-ASSOC-REJECT")) {
+        const char *s = strstr(m, "status_code=");
+        snprintf(buf, (size_t)n, "la borne refuse la connexion (code %d)%s", s ? atoi(s + 12) : 0,
+                 s && atoi(s + 12) == 17 ? " : trop d'appareils connectés" : "");
+        return buf;
+    }
+    if (strstr(m, "CTRL-EVENT-AUTH-REJECT")) return "la borne refuse l'authentification";
+    if (strstr(m, "CTRL-EVENT-DISCONNECTED")) {
+        const char *s = strstr(m, "reason=");
+        int r = s ? atoi(s + 7) : 0;
+        const char *t = reason_text(r);
+        snprintf(buf, (size_t)n, "déconnecté%s%s%s", t ? " : " : "", t ? t : "", strstr(m, "locally_generated=1") ? " (par la carte)" : "");
+        return buf;
+    }
+    if (strstr(m, "4-Way Handshake failed")) return "échange de clés échoué : mot de passe probablement faux";
+    if (strstr(m, "CTRL-EVENT-EAP-FAILURE")) return "identifiant ou mot de passe refusé";
+    if (strstr(m, "CTRL-EVENT-EAP-SUCCESS")) return "identifiant accepté";
+    if (strstr(m, "CTRL-EVENT-EAP-STARTED")) return "identification (réseau d'entreprise)…";
+    if (strstr(m, "CTRL-EVENT-CONNECTED")) return "connecté au Wi-Fi, demande d'une adresse…";
+    if (strstr(m, "Trying to associate")) return "tentative de connexion…";
+    if (strstr(m, "Trying to authenticate")) return "authentification auprès de la borne…";
+    if (strstr(m, "Associated with")) return "associé, échange des clés…";
+    if (strstr(m, "Key negotiation completed")) return "clés échangées";
+    if (strstr(m, "timed out")) return "la borne ne répond pas (trop loin ?)";
+    if (strstr(m, "CTRL-EVENT-NETWORK-NOT-FOUND")) return "réseau enregistré introuvable (hors de portée ?)";
+    if (strstr(m, "CTRL-EVENT-SCAN-FAILED")) return "la carte refuse de chercher les réseaux";
+    if (strstr(m, "CTRL-EVENT-REGDOM-CHANGE")) return "pays de la radio réglé";
+    return NULL;
+}
+
+static void mon_read(void) {
+    if (mon < 0) return;
+    static char prev[160];
+    static int repeats;
+    char buf[1024];
+    long n;
+    while ((n = sys_recv(mon, buf, sizeof buf - 1, 0x40 /* MSG_DONTWAIT */)) > 0) {
+        buf[n] = 0;
+        char *m = buf;
+        if (m[0] == '<') { char *e = strchr(m, '>'); if (e) m = e + 1; }
+        char *nl = strchr(m, '\n');
+        if (nl) *nl = 0;
+        /* trop bavards : recherches, bornes ajoutées ou retirées, signal */
+        if (strstr(m, "CTRL-EVENT-SCAN-STARTED") || strstr(m, "CTRL-EVENT-SCAN-RESULTS") || strstr(m, "CTRL-EVENT-BSS-") ||
+            strstr(m, "CTRL-EVENT-SIGNAL-CHANGE") || strstr(m, "WPS-AP-AVAILABLE") || strstr(m, "CTRL-EVENT-SUBNET-STATUS-UPDATE")) continue;
+        if (!strncmp(prev, m, sizeof prev - 1)) { repeats++; continue; }
+        if (repeats) klog("wpa : (message précédent répété %d fois)", repeats);
+        repeats = 0;
+        strlcpy(prev, m, sizeof prev);
+        char hb[120];
+        const char *h = event_hint(m, hb, sizeof hb);
+        klog("wpa : %.170s%s%s", m, h ? "  ->  " : "", h ? h : "");
+        if (h) strlcpy(wlast, h, sizeof wlast);
+    }
+    if (n == 0 || (n < 0 && n != -EAGAIN)) { sys_close(mon); mon = -1; }
 }
 
 /* envoie une commande, renvoie la longueur de la réponse (ou -1) */
@@ -568,6 +678,7 @@ static int w_list(wifi_net_t *list, int max) {
 static bool wpa3_only(const char *ssid);
 static bool w_connect(const char *ssid, const char *psk) {
     if (ctrl < 0) return false;
+    wlast[0] = 0;
     char cmd[256], hex[80];
     int id = net_id(ssid);
     if (id >= 0 && !psk) {
@@ -616,6 +727,7 @@ static bool w_connect(const char *ssid, const char *psk) {
  * MSCHAPv2 (eduroam, réseaux d'école ou d'entreprise) */
 static bool w_connect_eap(const char *ssid, const char *identity, const char *password) {
     if (ctrl < 0) return false;
+    wlast[0] = 0;
     char cmd[400], hex[80];
     int id = net_id(ssid);
     if (id < 0) {
@@ -695,6 +807,7 @@ typedef struct {
     battery_t bat;
     int wstate, wsignal, nnets;
     char wssid[33];
+    char wlast[120];                          /* dernière étape ou erreur de connexion */
     wifi_net_t nets[SNAP_NETS];
 } snap_t;                                     /* < 4096 octets : écrit d'un seul bloc dans le tube */
 typedef struct { int op; char ssid[33]; char psk[128]; char id[128]; } wcmd_t;
@@ -713,8 +826,10 @@ static void helper_main(int out, int in) {
     memset(&bat_last, 0, sizeof bat_last);
     for (;;) {
         uint64_t now = plat_ms();
-        struct pollfd p[2] = { { in, POLLIN, 0 }, { uev, POLLIN, 0 } };
-        if (sys_poll(p, uev >= 0 ? 2 : 1, next > now ? (int)(next - now) : 0) > 0) {
+        if (mon < 0 && ctrl >= 0) mon_open();
+        struct pollfd p[3] = { { in, POLLIN, 0 }, { uev, POLLIN, 0 }, { mon, POLLIN, 0 } };
+        if (sys_poll(p, 3, next > now ? (int)(next - now) : 0) > 0) {
+            if (mon >= 0 && (p[2].revents & (POLLIN | POLLHUP | POLLERR))) { mon_read(); next = 0; }
             if (uev >= 0 && (p[1].revents & POLLIN)) {
                 char ub[4096];
                 long n;
@@ -786,6 +901,7 @@ static void helper_main(int out, int in) {
             last_state = s.wstate;
         }
         if (ctrl >= 0) s.nnets = w_list(s.nets, SNAP_NETS);
+        strlcpy(s.wlast, wlast, sizeof s.wlast);
         sys_write(out, &s, sizeof s);                   /* tube non bloquant : perdu si le bureau est en retard */
         next = plat_ms() + 2000;
     }
@@ -858,6 +974,7 @@ bool plat_wifi_connect_eap(const char *ssid, const char *identity, const char *p
     return true;
 }
 void plat_wifi_forget(const char *ssid) { send_cmd(OP_FORGET, ssid, NULL); }
+void plat_wifi_last(char *buf, int n) { hw_poll(); strlcpy(buf, have_snap ? snap.wlast : "", (size_t)n); }
 
 void plat_battery(battery_t *b) {
     hw_poll();

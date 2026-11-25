@@ -17,13 +17,16 @@ typedef struct {
     char watch[33];                   /* réseau enregistré en cours de connexion : son mot de passe marche-t-il ? */
     uint64_t watch_t0;
     bool watch_eap;
+    char conn[33];                    /* connexion demandée : suivie jusqu'au résultat */
+    uint64_t conn_t0, conn_ok_t;
     char pending[33];                 /* réseau en attente du mot de passe */
     char pending_id[128];             /* identifiant (WPA2-Entreprise) */
     char menu_ssid[33];               /* réseau visé par le menu (clic droit) */
 } net_t;
 
 enum { J_NONE, J_DHCP, J_PING };
-enum { H_NONE = -1, H_REFRESH = 1000, H_PING = 1001, H_HIDDEN = 1002, H_WIRED = 2000 };
+enum { H_NONE = -1, H_REFRESH = 1000, H_PING = 1001, H_HIDDEN = 1002, H_CONSOLE = 1003, H_WIRED = 2000 };
+void app_netconsole_open(void);
 
 static window_t *cur_net;
 
@@ -35,7 +38,20 @@ static rect_t list_rect(canvas_t *c, net_t *s) {
 }
 static rect_t refresh_rect(canvas_t *c) { return R(c->w - 16 - 130, 16, 130, 36); }
 static rect_t hidden_rect(canvas_t *c) { return R(c->w - 16 - 130 - 10 - 160, 16, 160, 36); }
-static rect_t ping_rect(canvas_t *c) { return R(16, c->h - 54, 190, 38); }
+static rect_t ping_rect(canvas_t *c) { return R(16, c->h - 54, 170, 38); }
+static rect_t console_rect(canvas_t *c) { return R(16 + 170 + 10, c->h - 54, 120, 38); }
+
+/* texte sur deux lignes au plus (coupé aux espaces) */
+static void wrap2(canvas_t *c, const font_t *f, int x, int y, int maxw, const char *t, uint32_t col) {
+    int n = (int)strlen(t), cut = n;
+    if (text_width(f, t) > maxw) {
+        cut = 0;
+        for (int i = 1; i <= n; i++) if ((t[i] == ' ' || !t[i]) && text_width_n(f, t, i) <= maxw) cut = i;
+        if (!cut) cut = n;
+    }
+    text_draw_n(c, f, x, cut < n ? y - 8 : y, t, cut, col);
+    if (cut < n) text_fit(c, f, x, y + 9, maxw, t + cut + 1, col);
+}
 static rect_t wired_row(canvas_t *c, net_t *s, int k) {
     rect_t L = list_rect(c, s);
     return R(16, L.y + L.h + 40 + k * 58, c->w - 32, 52);
@@ -131,13 +147,22 @@ static void net_draw(window_t *w, canvas_t *c) {
         k++;
     }
     ui_button(c, ping_rect(c), s->job >= 0 && s->job_kind == J_PING ? "Test en cours…" : "Tester Internet", BTN_ACCENT, s->hover == H_PING);
-    text_fit(c, &font_body, 222, c->h - 45, c->w - 240, s->result, C_TEXT2);
+    ui_button(c, console_rect(c), "Console", BTN_NORMAL, s->hover == H_CONSOLE);
+    rect_t cr = console_rect(c);
+    wrap2(c, &font_small, cr.x + cr.w + 14, c->h - 42, c->w - (cr.x + cr.w + 14) - 16, s->result, C_TEXT2);
 }
 
 /* ---- actions ---- */
+static void track(net_t *s, const char *ssid) {
+    strlcpy(s->conn, ssid, sizeof s->conn);
+    s->conn_t0 = plat_ms();
+    s->conn_ok_t = 0;
+}
+
 static void connect_with(const char *ssid, const char *psk, net_t *s) {
     if (!plat_wifi_connect(ssid, psk)) { wm_toast("Impossible de se connecter à ce réseau."); return; }
     snprintf(s->result, sizeof s->result, "Connexion à « %s »…", ssid);
+    track(s, ssid);
     s->next_list = 0;
 }
 
@@ -155,6 +180,7 @@ static void eap_password_cb(const char *pw, void *ctx) {
     if (!pw[0]) { dlg_message("Wi-Fi", "Le mot de passe est vide."); return; }
     if (!plat_wifi_connect_eap(s->pending, s->pending_id, pw)) { wm_toast("Impossible de se connecter à ce réseau."); return; }
     snprintf(s->result, sizeof s->result, "Connexion à « %s » avec l'identifiant %s…", s->pending, s->pending_id);
+    track(s, s->pending);
     s->next_list = 0;
     wm_invalidate(cur_net);
 }
@@ -259,6 +285,7 @@ static void net_event(window_t *w, const event_t *e) {
         if (s->wstate != WIFI_NONE && rect_has(refresh_rect(c), e->x, e->y)) h = H_REFRESH;
         if (s->wstate != WIFI_NONE && rect_has(hidden_rect(c), e->x, e->y)) h = H_HIDDEN;
         if (rect_has(ping_rect(c), e->x, e->y)) h = H_PING;
+        if (rect_has(console_rect(c), e->x, e->y)) h = H_CONSOLE;
         for (int k = 0; k < wired_count(s); k++) if (rect_has(dhcp_rect(c, s, k), e->x, e->y)) h = H_WIRED + k;
         if (h != s->hover) { s->hover = h; wm_invalidate(w); }
         return;
@@ -280,6 +307,9 @@ static void net_event(window_t *w, const event_t *e) {
             if (n->known && n->secure) wm_menu(cl.x + e->x, cl.y + e->y, items3, 3, ctx_cb, w);
             else wm_menu(cl.x + e->x, cl.y + e->y, items2, n->known ? 2 : 1, ctx_cb, w);
         } else choose(w, s, &s->nets[s->hover]);
+    } else if (s->hover == H_CONSOLE) {
+        app_netconsole_open();
+        return;
     } else if (s->hover == H_HIDDEN) {
         cur_net = w;
         dlg_input("Réseau masqué", "Nom exact du réseau (SSID)", "", hidden_name_cb, s);
@@ -334,6 +364,30 @@ static void net_tick(window_t *w, uint64_t now) {
             wm_invalidate(w);
         }
     }
+    /* connexion demandée : étape en cours, puis un vrai résultat (ou la raison de l'échec) */
+    if (s->conn[0]) {
+        char last[120], msg[160];
+        plat_wifi_last(last, sizeof last);
+        int secs = (int)((now - s->conn_t0) / 1000);
+        bool on = s->wstate == WIFI_CONNECTED && !strcmp(s->wssid, s->conn);
+        const char *ip = NULL;
+        for (int i = 0; i < s->nifs; i++) if (!strcmp(s->ifs[i].kind, "Wi-Fi") && s->ifs[i].ip[0]) ip = s->ifs[i].ip;
+        bool done = true;
+        if (on && ip) snprintf(msg, sizeof msg, "Connecté à « %s » · adresse %s.", s->conn, ip);
+        else if (on) {
+            if (!s->conn_ok_t) s->conn_ok_t = now;
+            if (now - s->conn_ok_t > 20000)
+                snprintf(msg, sizeof msg, "Connecté à « %s », mais la box ne donne pas d'adresse (DHCP). Voir la console.", s->conn);
+            else { snprintf(msg, sizeof msg, "Connecté à « %s », demande d'une adresse… (%d s)", s->conn, secs); done = false; }
+        } else if (s->wstate == WIFI_REFUSED)
+            snprintf(msg, sizeof msg, "« %s » : %s.", s->conn, last[0] ? last : "mot de passe refusé");
+        else if (now - s->conn_t0 > 35000) {
+            if (last[0]) snprintf(msg, sizeof msg, "« %s » : la connexion n'aboutit pas (%s). Voir la console.", s->conn, last);
+            else snprintf(msg, sizeof msg, "« %s » : la connexion n'aboutit pas. Voir la console.", s->conn);
+        } else { snprintf(msg, sizeof msg, "Connexion à « %s »… %s (%d s)", s->conn, last, secs); done = false; }
+        if (done) s->conn[0] = 0;
+        if (strcmp(msg, s->result)) { strlcpy(s->result, msg, sizeof s->result); wm_invalidate(w); }
+    }
     /* « Actualiser » : au bout de 5 s, le résultat remplace « Recherche… » */
     if (s->scan_t0 && now - s->scan_t0 > 5000) {
         s->scan_t0 = 0;
@@ -387,4 +441,196 @@ void app_network_open(void) {
     w->event = net_event;
     w->tick = net_tick;
     w->on_close = net_close;
+}
+
+/* ================================================================== */
+/* Console réseau : ce que font la carte Wi-Fi, wpa_supplicant et le DHCP */
+/* ================================================================== */
+#define CL_MAX 800
+typedef struct { char t[12]; char s[150]; uint32_t col; } cline_t;
+typedef struct {
+    cline_t *l;
+    int n, scroll, hover, job;
+    bool follow;
+    char status[160];
+} con_t;
+enum { C_DIAG = 1, C_SAVE, C_CLEAR };
+static window_t *cur_con;
+
+static uint32_t line_color(const char *s) {
+    static const char *const bad[] = { "refus", "échou", "échec", "erreur", "error", "Error", "fail", "FAIL", "timed out", "REJECT",
+                                       "DISCONNECTED", "TEMP-DISABLED", "ne répond pas", "introuvable", "pas de réponse", "débranché",
+                                       "déconnecté", "deauth", "faux", "n'aboutit" };
+    static const char *const good[] = { "CTRL-EVENT-CONNECTED", "connecté au Wi-Fi", ": adresse ", "associated", "clés échangées",
+                                        "identifiant accepté", "Internet fonctionne", "branché sur", "partage de connexion USB" };
+    for (int i = 0; i < countof(bad); i++) if (strstr(s, bad[i])) return 0xFFFCA5A5;
+    for (int i = 0; i < countof(good); i++) if (strstr(s, good[i])) return 0xFF86EFAC;
+    if (str_starts(s, "diag")) return 0xFFE2E8F0;
+    if (str_starts(s, "wpa") || str_starts(s, "Wi-Fi") || str_starts(s, "réseau")) return 0xFFCBD5E1;
+    return 0xFF94A3B8;                                    /* messages du noyau */
+}
+
+/* heure locale d'un message (microsecondes depuis le démarrage) */
+static void line_time(uint64_t usec, char out[12]) {
+    datetime_t d;
+    local_now(&d);
+    long now_s = d.hour * 3600 + d.min * 60 + d.sec;
+    long ago = (long)(plat_ms() / 1000) - (long)(usec / 1000000);
+    long t = ((now_s - ago) % 86400 + 86400) % 86400;
+    snprintf(out, 12, "%02d:%02d:%02d", (int)(t / 3600), (int)(t / 60 % 60), (int)(t % 60));
+}
+
+static void con_add(con_t *c, const char *tm, const char *s) {
+    uint32_t col = line_color(s);
+    int len = (int)strlen(s), off = 0;
+    while (off < len) {                                   /* lignes longues : coupées (sans casser un caractère) */
+        int take = MIN(len - off, (int)sizeof c->l[0].s - 1);
+        if (off + take < len) {
+            int sp = take;
+            while (sp > 60 && s[off + sp] != ' ') sp--;
+            if (sp > 60) take = sp;
+            while (take > 1 && ((uint8_t)s[off + take] & 0xC0) == 0x80) take--;
+        }
+        if (c->n >= CL_MAX) { memmove(c->l, c->l + 100, sizeof c->l[0] * (CL_MAX - 100)); c->n -= 100; c->scroll = MAX(0, c->scroll - 100); }
+        cline_t *l = &c->l[c->n++];
+        strlcpy(l->t, off ? "" : tm, sizeof l->t);
+        memcpy(l->s, s + off, (size_t)take);
+        l->s[take] = 0;
+        l->col = col;
+        off += take;
+        while (off < len && s[off] == ' ') off++;
+    }
+}
+
+static rect_t con_btn(canvas_t *c, int k) {             /* 1 diagnostic, 2 enregistrer, 3 effacer */
+    static const int w[] = { 0, 190, 130, 110 };
+    int x = c->w - 16;
+    for (int i = 3; i >= k; i--) x -= w[i] + (i < 3 ? 10 : 0);
+    return R(x, 16, w[k], 36);
+}
+static rect_t con_list(canvas_t *c) { return R(16, 66, c->w - 32, c->h - 66 - 40); }
+#define CL_H 17
+
+static void con_draw(window_t *w, canvas_t *c) {
+    con_t *s = w->data;
+    text_draw(c, &font_title, 20, 14, "Console réseau", C_TEXT);
+    text_draw(c, &font_small, 20, 38, "Wi-Fi, wpa_supplicant, câble et DHCP, en direct", C_MUTED);
+    ui_button(c, con_btn(c, C_DIAG), s->job >= 0 ? "Diagnostic en cours…" : "Diagnostic complet", BTN_ACCENT, s->hover == C_DIAG);
+    ui_button(c, con_btn(c, C_SAVE), "Enregistrer", BTN_NORMAL, s->hover == C_SAVE);
+    ui_button(c, con_btn(c, C_CLEAR), "Effacer", BTN_NORMAL, s->hover == C_CLEAR);
+    rect_t L = con_list(c);
+    gfx_rrect(c, L.x, L.y, L.w, L.h, 12, 0x70000000);
+    rect_t old = c->clip;
+    canvas_clip(c, rect_grow(L, -4));
+    int vis = (L.h - 12) / CL_H;
+    if (s->follow) s->scroll = MAX(0, s->n - vis);
+    if (!s->n) text_center(c, &font_body, R(L.x, L.y + 20, L.w, 22), "Aucun message réseau pour l'instant.", C_MUTED);
+    for (int i = s->scroll; i < s->n && i < s->scroll + vis + 1; i++) {
+        int y = L.y + 6 + (i - s->scroll) * CL_H;
+        text_draw(c, &font_small, L.x + 10, y, s->l[i].t, 0xFF64748B);
+        text_fit(c, &font_small, L.x + 74, y, L.w - 90, s->l[i].s, s->l[i].col);
+    }
+    c->clip = old;
+    ui_scrollbar(c, R(L.x + L.w - 8, L.y + 8, 4, L.h - 16), s->n, vis, s->scroll);
+    text_fit(c, &font_small, 20, c->h - 30, c->w - 40, s->status[0] ? s->status :
+             "« Enregistrer » crée Documents/console-reseau.txt : envoyez ce fichier (ou une photo de cet écran).", C_MUTED);
+}
+
+static void con_save(con_t *s) {
+    size_t cap = (size_t)s->n * 170 + 256, k = 0;
+    char *b = malloc(cap);
+    if (!b) return;
+    k += (size_t)snprintf(b + k, cap - k, "TitanOs " TITANOS_VERSION " - console réseau\n\n");
+    for (int i = 0; i < s->n && k < cap - 200; i++)
+        k += (size_t)snprintf(b + k, cap - k, "%-8s %s\n", s->l[i].t, s->l[i].s);
+    char p[300];
+    snprintf(p, sizeof p, "%s/Documents/console-reseau.txt", plat_home());
+    bool ok = plat_writefile(p, b, k) == 0;
+    free(b);
+    snprintf(s->status, sizeof s->status, ok ? "Enregistré : Documents/console-reseau.txt (%d lignes)." : "Enregistrement impossible.", s->n);
+}
+
+static void con_event(window_t *w, const event_t *e) {
+    con_t *s = w->data;
+    canvas_t *c = &w->surf;
+    rect_t L = con_list(c);
+    int vis = (L.h - 12) / CL_H;
+    if (e->type == EV_MOTION) {
+        int h = 0;
+        for (int k = C_DIAG; k <= C_CLEAR; k++) if (rect_has(con_btn(c, k), e->x, e->y)) h = k;
+        if (h != s->hover) { s->hover = h; wm_invalidate(w); }
+        return;
+    }
+    if (e->type == EV_WHEEL) {
+        s->scroll = CLAMP(s->scroll + e->dy * 3, 0, MAX(0, s->n - vis));
+        s->follow = s->scroll >= s->n - vis;
+        wm_invalidate(w);
+        return;
+    }
+    if (e->type != EV_BUTTON || !e->down || !s->hover) return;
+    sound_play(SFX_CLICK);
+    if (s->hover == C_DIAG && s->job < 0) {
+        /* état complet du réseau, écrit dans le journal du noyau : il arrive ici comme le reste */
+        static const char script[] =
+            "{ echo '== cartes'; ip -4 addr; echo '== routes'; ip route; echo '== DNS'; cat /etc/resolv.conf;"
+            " for n in /sys/class/net/*; do echo \"${n##*/} etat=$(cat $n/operstate) lien=$(cat $n/carrier 2>/dev/null)\"; done;"
+            " for s in /run/wpa_supplicant/*; do [ -S \"$s\" ] || continue; i=${s##*/}; echo \"== wpa_supplicant $i\";"
+            " wpa_cli -p /run/wpa_supplicant -i $i status | grep -vE 'passphrase|psk'; wpa_cli -p /run/wpa_supplicant -i $i list_networks; done;"
+            " for w in /sys/class/net/*/wireless; do [ -e \"$w\" ] || continue; d=${w%/wireless}; d=${d##*/}; echo \"== liaison $d\";"
+            " iw dev $d link; iw dev $d station dump | grep -E 'signal|bitrate'; done;"
+            " echo '== pays'; iw reg get | head -n 4; echo '== test'; ping -c 2 -W 3 1.1.1.1 | tail -n 2;"
+            " nslookup github.com 2>&1 | tail -n 2; } 2>&1 | while IFS= read -r l; do echo \"<6>titanos: diag : $l\" > /dev/kmsg; done";
+        const char *argv[] = { "/bin/busybox", "sh", "-c", script, NULL };
+        s->job = plat_spawn(argv);
+        strlcpy(s->status, "Diagnostic en cours : adresses, routes, wpa_supplicant, liaison, test d'Internet…", sizeof s->status);
+    } else if (s->hover == C_SAVE) con_save(s);
+    else if (s->hover == C_CLEAR) { s->n = 0; s->scroll = 0; s->follow = true; s->status[0] = 0; }
+    wm_invalidate(w);
+}
+
+static void con_tick(window_t *w, uint64_t now) {
+    con_t *s = w->data;
+    (void)now;
+    bool added = false;
+    char line[400], tm[12];
+    uint64_t us;
+    for (int k = 0; k < 300 && plat_netlog_next(line, sizeof line, &us); k++) {
+        line_time(us, tm);
+        con_add(s, tm, line);
+        added = true;
+    }
+    if (s->job >= 0) {
+        char out[64];
+        int r = plat_spawn_poll(s->job, out, sizeof out);
+        if (r != -1) { s->job = -1; strlcpy(s->status, "Diagnostic terminé.", sizeof s->status); added = true; }
+    }
+    if (added) wm_invalidate(w);
+}
+
+static void con_close(window_t *w) {
+    con_t *s = w->data;
+    if (cur_con == w) cur_con = NULL;
+    free(s->l);
+    free(s);
+}
+
+void app_netconsole_open(void) {
+    if (cur_con && cur_con->used) { wm_focus(cur_con); return; }
+    con_t *s = calloc(1, sizeof *s);
+    if (!s) return;
+    s->l = calloc(CL_MAX, sizeof *s->l);
+    if (!s->l) { free(s); return; }
+    s->job = -1;
+    s->follow = true;
+    window_t *w = wm_open("Console réseau", ICON_TERMINAL, 900, 540, WF_RESIZABLE);
+    if (!w) { free(s->l); free(s); return; }
+    w->minw = 560;
+    w->minh = 320;
+    w->data = s;
+    w->draw = con_draw;
+    w->event = con_event;
+    w->tick = con_tick;
+    w->on_close = con_close;
+    cur_con = w;
+    plat_netlog_rewind();                                 /* tout depuis le démarrage */
 }

@@ -58,7 +58,7 @@ int plat_listdir(const char *path, dirent_t **out) {
     return n;
 }
 int plat_readfile(const char *path, char **data, size_t *len) {
-    const char *t = "Bienvenue dans TitanOs (bêta 28) !\n\nCe Bloc-notes enregistre vos textes sur la clé USB.\n"
+    const char *t = "Bienvenue dans TitanOs (bêta 29) !\n\nCe Bloc-notes enregistre vos textes sur la clé USB.\n"
                     "Le système tourne sur le noyau Linux, mais tout ce que vous voyez est fait maison.\n";
     if (str_ends(path, ".cfg")) return -1;
     *len = strlen(t);
@@ -81,7 +81,7 @@ int plat_pty_read(int id, char *buf, int n) {
     if (pty_sent[id & 7]) return 0;
     pty_sent[id & 7] = true;
     const char *s =
-        "\x1b[1;35mTitanOs bêta 28\x1b[0m - noyau Linux 6.18.65 - BusyBox 1.37\r\n"
+        "\x1b[1;35mTitanOs bêta 29\x1b[0m - noyau Linux 6.18.65 - BusyBox 1.37\r\n"
         "Tapez \x1b[1maide\x1b[0m pour la liste des commandes.\r\n\r\n"
         "\x1b[1;32mtitan\x1b[0m@\x1b[36mtitanos\x1b[0m:\x1b[1;34m~\x1b[0m$ ls\r\n"
         "\x1b[1;34mDocuments\x1b[0m  \x1b[1;34mImages\x1b[0m  \x1b[1;34mMusique\x1b[0m  Bienvenue.txt  vacances.png\r\n"
@@ -293,3 +293,25 @@ void plat_xapp_stop(int x) { (void)x; }
 bool plat_xapp_cursor(int x, canvas_t *img, int *hx, int *hy) { (void)x; (void)img; (void)hx; (void)hy; return false; }
 void plat_xapp_manage(int x) { (void)x; }
 bool plat_browser_is_chrome(void) { return false; }
+
+void plat_wifi_last(char *buf, int n) { strlcpy(buf, "associé, échange des clés…", (size_t)n); }
+static int netlog_i;
+void plat_netlog_rewind(void) { netlog_i = 0; }
+int plat_netlog_next(char *line, int n, uint64_t *usec) {
+    static const char *const lines[] = {
+        "Wi-Fi : wlan0 prêt", "wpa : écoute des événements de la connexion Wi-Fi",
+        "réseau : carte eth0 (pilote sky2) allumée", "réseau : eth0 prêt, pas de câble",
+        "Wi-Fi : 9 bornes pour wpa_supplicant, 11 pour le noyau : Livebox-A3F2 (-58 dBm, 2437 MHz), POCO F8 Ultra (-41 dBm, 5180 MHz)",
+        "wpa : Trying to associate with SSID 'POCO F8 Ultra'  ->  tentative de connexion…",
+        "wlan0: authenticate with 2a:11:9c:40:7e:01 (local address=00:27:10:5e:aa:01)",
+        "wlan0: send auth to 2a:11:9c:40:7e:01 (try 1/3)",
+        "wlan0: authentication with 2a:11:9c:40:7e:01 timed out",
+        "wpa : CTRL-EVENT-SSID-TEMP-DISABLED id=2 ssid=\"POCO F8 Ultra\" auth_failures=1 duration=10 reason=CONN_FAILED  ->  la connexion échoue (signal trop faible ou borne qui refuse)",
+        "wpa : CTRL-EVENT-CONNECTED - Connection to 64:66:b3:12:aa:10 completed [id=0 id_str=]  ->  connecté au Wi-Fi, demande d'une adresse…",
+        "réseau : wlan0 : adresse 192.168.1.42, passerelle 192.168.1.1, DNS 192.168.1.1, priorité 600",
+    };
+    if (netlog_i >= (int)countof(lines)) return 0;
+    *usec = (uint64_t)(netlog_i + 12) * 1700000;
+    strlcpy(line, lines[netlog_i++], (size_t)n);
+    return 1;
+}

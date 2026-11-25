@@ -389,7 +389,7 @@ static void prepare_home(bool on_key, const char *storage) {
     if (first) {
         char p[256];
         snprintf(p, sizeof p, "%s/Bienvenue.txt", home);
-        const char *t = "Bienvenue dans TitanOs (bêta 28) !\n\n"
+        const char *t = "Bienvenue dans TitanOs (bêta 29) !\n\n"
                         "TitanOs tourne sur le noyau Linux : Linux fournit les pilotes (écran, clavier,\n"
                         "USB, Wi-Fi, son...), et tout le reste est écrit pour TitanOs.\n\n"
                         "Vos fichiers sont gardés sur la clé USB, dans le dossier Utilisateur.\n"
@@ -738,6 +738,7 @@ static int init_main(void) {
     mkdirs("/media");
     mkdirs("/var/run");
     write_file("/proc/sys/kernel/printk", "1 4 1 7");
+    write_file("/proc/sys/kernel/printk_devkmsg", "on");     /* messages de TitanOs jamais limités (console réseau) */
     sys_sethostname("titanos", 7);
     sys_reboot(LINUX_REBOOT_CMD_CAD_OFF);        /* Ctrl+Alt+Suppr ne redémarre pas brutalement */
     iface_up("lo");

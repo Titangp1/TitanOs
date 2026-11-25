@@ -25,8 +25,8 @@ typedef __builtin_va_list va_list;
 #define false 0
 #define NULL  ((void *)0)
 
-#define TITANOS_VERSION "Bêta 28"
-#define TITANOS_BUILD   28             /* numéro de version, comparé aux mises à jour publiées */
+#define TITANOS_VERSION "Bêta 29"
+#define TITANOS_BUILD   29             /* numéro de version, comparé aux mises à jour publiées */
 #define countof(a) ((int)(sizeof(a) / sizeof((a)[0])))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -218,6 +218,10 @@ void  plat_wifi_scan(void);
 int   plat_wifi_list(wifi_net_t *list, int max);
 bool  plat_wifi_connect(const char *ssid, const char *psk); /* psk NULL : réseau ouvert ou connu */
 bool  plat_wifi_connect_eap(const char *ssid, const char *identity, const char *password);   /* WPA2-Entreprise */
+void  plat_wifi_last(char *buf, int n);                     /* dernière étape ou erreur de connexion, en clair */
+/* console réseau : lignes du journal du noyau qui concernent le réseau ; 1 tant qu'il y en a */
+int   plat_netlog_next(char *line, int n, uint64_t *usec);
+void  plat_netlog_rewind(void);                             /* la prochaine lecture repart du début */
 void  plat_wifi_forget(const char *ssid);
 
 /* ---------------- bureau (appelé par la plateforme) ---------------- */

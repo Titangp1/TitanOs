@@ -468,6 +468,38 @@ int plat_procs(proc_t *list, int max) {
 
 bool plat_kill(int pid) { return pid > 1 && pid != sys_getpid() && sys_kill(pid, 15) == 0; }
 
+/* ---------------- console réseau : le journal du noyau, filtré ---------------- */
+static int kmsg_fd = -1;
+static bool net_line(const char *m) {
+    static const char *const keys[] = { "titanos: réseau", "titanos: Wi-Fi", "titanos: wpa", "titanos: diag", "wlan", "iwlwifi",
+                                        "cfg80211", "ieee80211", "sky2", "eth0", "eth1", "usb0", "rndis", "cdc_ncm", "cdc_ether", "udhcpc" };
+    for (int i = 0; i < countof(keys); i++) if (strstr(m, keys[i])) return true;
+    return false;
+}
+void plat_netlog_rewind(void) { if (kmsg_fd >= 0) sys_close(kmsg_fd); kmsg_fd = -1; }
+int plat_netlog_next(char *line, int n, uint64_t *usec) {
+    if (kmsg_fd < 0) kmsg_fd = sys_open("/dev/kmsg", O_RDONLY | O_NONBLOCK | O_CLOEXEC, 0);
+    if (kmsg_fd < 0) return 0;
+    static char rec[1200];
+    for (int guard = 0; guard < 500; guard++) {
+        long r = sys_read(kmsg_fd, rec, sizeof rec - 1);
+        if (r == -EPIPE) continue;                       /* anciens messages écrasés : on continue */
+        if (r <= 0) return 0;
+        rec[r] = 0;
+        char *semi = strchr(rec, ';');
+        if (!semi) continue;
+        char *c1 = strchr(rec, ','), *c2 = c1 ? strchr(c1 + 1, ',') : NULL;
+        char *msg = semi + 1, *nl = strchr(msg, '\n');
+        if (nl) *nl = 0;
+        if (!net_line(msg)) continue;
+        if (str_starts(msg, "titanos: ")) msg += 9;
+        strlcpy(line, msg, (size_t)n);
+        *usec = c2 ? (uint64_t)strtol(c2 + 1, NULL, 10) : 0;
+        return 1;
+    }
+    return 0;
+}
+
 /* ---------------- réseau ---------------- */
 typedef struct { netif_t *list; int n, max; } net_ctx_t;
 
