@@ -252,6 +252,16 @@ static void wifi_start(void) {
     ok("SET filter_ssids 0");
     ok("SET autoscan exponential:3:60");
     ok("SET scan_cur_freq 0");
+    if (path_exists("/usr/sbin/iw")) {                   /* économie d'énergie de la radio : coupée */
+        int c = sys_fork();
+        if (c == 0) {
+            int nul = sys_open("/dev/null", O_RDWR, 0);
+            if (nul >= 0) { sys_dup2(nul, 0); sys_dup2(nul, 1); sys_dup2(nul, 2); }
+            char *argv[] = { "/usr/sbin/iw", "dev", iface, "set", "power_save", "off", NULL };
+            sys_execve(argv[0], argv, g_envp);
+            sys_exit(127);
+        }
+    }
     klog("Wi-Fi : %s prêt", iface);
 }
 
@@ -367,6 +377,98 @@ static void w_scan(void) {
     ok("SCAN");
 }
 
+/* Bornes connues du noyau (« iw dev wlan0 scan dump ») : toutes celles entendues par les
+ * dernières recherches (de wpa_supplicant ou d'ailleurs), même celles que wpa_supplicant
+ * n'a pas gardées dans sa liste. Elles sont ajoutées aux réseaux affichés. */
+static int kernel_count;
+static int kernel_bss(wifi_net_t *list, int n, int max) {
+    static char out[65536];
+    static int outn;
+    static uint64_t next;
+    if (!iface[0] || !path_exists("/usr/sbin/iw")) return n;
+    if (plat_ms() >= next) {
+        next = plat_ms() + 4000;
+        int p[2];
+        if (sys_pipe2(p, O_CLOEXEC) == 0) {
+            int c = sys_fork();
+            if (c == 0) {
+                sys_dup2(p[1], 1);
+                int nul = sys_open("/dev/null", O_RDWR, 0);
+                if (nul >= 0) { sys_dup2(nul, 0); sys_dup2(nul, 2); }
+                char *argv[] = { "/usr/sbin/iw", "dev", iface, "scan", "dump", NULL };
+                sys_execve(argv[0], argv, g_envp);
+                sys_exit(127);
+            }
+            sys_close(p[1]);
+            outn = 0;
+            if (c > 0) {
+                uint64_t end = plat_ms() + 2000;
+                for (;;) {
+                    struct pollfd pf = { p[0], POLLIN, 0 };
+                    if (sys_poll(&pf, 1, 200) <= 0) { if (plat_ms() > end) break; continue; }
+                    long r = sys_read(p[0], out + outn, sizeof out - 1 - (size_t)outn);
+                    if (r <= 0) break;
+                    outn += (int)r;
+                    if (outn >= (int)sizeof out - 1) break;
+                }
+                int st;
+                sys_wait4(c, &st, 0);
+            }
+            sys_close(p[0]);
+            out[outn] = 0;
+        }
+    }
+    /* BSS xx:xx...  /  freq: 2412  /  signal: -67.00 dBm  /  SSID: nom  /  RSN, WPA, Privacy */
+    char ssid[64] = "";
+    int sig = -100, cnt = 0;
+    bool sec = false, in = false;
+    char *l = out;
+    for (;;) {
+        char *e = l ? strchr(l, '\n') : NULL;
+        bool last = !l || !*l;
+        if (last || str_starts(l, "BSS ")) {
+            if (in && ssid[0]) {
+                int s = CLAMP(2 * (sig + 100), 0, 100), k;
+                for (k = 0; k < n; k++) if (!strcmp(list[k].ssid, ssid)) break;
+                if (k == n && n < max) {
+                    memset(&list[n], 0, sizeof list[n]);
+                    strlcpy(list[n].ssid, ssid, sizeof list[n].ssid);
+                    list[n].secure = sec;
+                    list[n].signal = s;
+                    n++;
+                } else if (k < n && s > list[k].signal) list[k].signal = s;
+            }
+            if (last) break;
+            in = true;
+            cnt++;
+            ssid[0] = 0;
+            sig = -100;
+            sec = false;
+        } else if (in) {
+            const char *t = l;
+            while (*t == '\t' || *t == ' ') t++;
+            if (str_starts(t, "SSID: ")) {
+                char raw[96];
+                int len = e ? (int)(e - (t + 6)) : (int)strlen(t + 6);
+                if (len > (int)sizeof raw - 1) len = sizeof raw - 1;
+                memcpy(raw, t + 6, (size_t)len);
+                raw[len] = 0;
+                unescape(raw, ssid, sizeof ssid);
+            } else if (str_starts(t, "signal: ")) sig = atoi(t + 8);
+            else if (str_starts(t, "RSN:") || str_starts(t, "WPA:") || (str_starts(t, "capability:") && strstr(t, "Privacy"))) {
+                char *nl2 = e ? e : (char *)t + strlen(t);
+                char save = *nl2;
+                *nl2 = 0;
+                if (!str_starts(t, "capability:") || strstr(t, "Privacy")) sec = true;
+                *nl2 = save;
+            }
+        }
+        l = e ? e + 1 : NULL;
+    }
+    kernel_count = cnt;
+    return n;
+}
+
 static int w_list(wifi_net_t *list, int max) {
     static char buf[16384];
     char cur[33];
@@ -394,7 +496,7 @@ static int w_list(wifi_net_t *list, int max) {
             if (fq && lv) k += snprintf(det + k, sizeof det - (size_t)k, "%s%.24s (%d dBm, %d MHz)", i ? ", " : "", nm && *nm ? nm : "masqué", atoi(lv), atoi(fq));
             l = e;
         }
-        klog("Wi-Fi : %d bornes entendues : %s", bss, det);
+        klog("Wi-Fi : %d bornes pour wpa_supplicant, %d pour le noyau : %s", bss, kernel_count, det);
         last_bss = bss;
         next_log = plat_ms() + 60000;
     }
@@ -421,6 +523,7 @@ static int w_list(wifi_net_t *list, int max) {
         }
         line = nl;
     }
+    n = kernel_bss(list, n, max);                     /* + bornes entendues par la carte */
     /* réseaux enregistrés */
     static char nets[4096];
     if (request("LIST_NETWORKS", nets, sizeof nets) > 0)

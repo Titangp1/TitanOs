@@ -163,7 +163,8 @@ static void draw_time(prefs_t *p, canvas_t *c) {
 static void draw_account(prefs_t *p, canvas_t *c) {
     row(c, 0, "Nom d'utilisateur", p->name.focus ? "Entrée pour valider" : "Affiché à l'écran de verrouillage");
     ui_field(c, row_ctrl(c, 0, 300, 40), &p->name, NULL);
-    row(c, 1, "Mot de passe de session", g_set.pass[0] ? "Demandé à l'écran de verrouillage" : "Aucun : la session s'ouvre d'un clic");
+    row(c, 1, "Mot de passe de session", g_set.pass[0] ? "Demandé à l'écran de verrouillage et par sudo dans le Terminal"
+                                                       : "Aucun : la session s'ouvre d'un clic, et sudo est désactivé");
     ui_button(c, row_ctrl(c, 1, 170, 36), g_set.pass[0] ? "Changer…" : "Définir…", BTN_NORMAL, p->hover == H_PASS);
     if (g_set.pass[0]) {
         rect_t b = row_ctrl(c, 1, 170, 36);

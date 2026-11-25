@@ -2,6 +2,27 @@
 
 Toutes les versions sont dans les [versions publiées](../../releases). Depuis la bêta 6, TitanOs se met à jour tout seul.
 
+## Bêta 26
+
+**Terminal sans droits d'administrateur, et sudo**
+- **Faille corrigée** : le Terminal ouvrait un shell **root** sans aucun mot de passe, et l'invite affichait « titan » au lieu de « root ». Il tourne maintenant sous le compte **titan** (uid 1000), sans droits d'administrateur.
+- **`sudo commande`** lance une commande en administrateur après le **mot de passe de session**, celui de l'écran de verrouillage (Paramètres → Compte). Comme le sudo habituel : trois essais au plus, réussite gardée 5 minutes par terminal, `sudo -i` pour un shell root, `sudo -k` pour l'oublier tout de suite. Chaque commande est notée dans le journal.
+- Sans mot de passe de session, sudo refuse et explique comment en définir un.
+- L'invite montre qui vous êtes : `titan@titanos:~$` en vert, `root@titanos:~#` en rouge.
+- Le dossier personnel est `/home/titan`, avec des raccourcis vers vos dossiers (Documents, Images, Musique, Téléchargements, Vidéos). Il est gardé d'un démarrage à l'autre dans l'espace des applications.
+- Vos fichiers sur la clé ou le disque, et ceux des clés USB branchées, appartiennent à titan : vous pouvez les modifier depuis le Terminal sans sudo.
+- Le dossier de root (`/root`) n'est plus lisible par titan.
+
+**Commandes de base**
+- **bash** devient le shell du Terminal : historique, flèches, complétion.
+- Ajoutées à BusyBox : **lsblk**, **lscpu**, **findmnt**, **lspci** et **lsusb** (avec les noms des appareils), **nano**, **less**, **htop**, **tree**, **zip**, **bc**, **pstree** et **killall**, **iw**.
+- `aide` présente sudo et ces commandes. Les alias `eteindre` et `redemarrer` passent par sudo.
+
+**Wi-Fi**
+- La liste des réseaux reprend maintenant **toutes les bornes entendues par la carte**, lues directement dans le noyau (`iw scan dump`). Avant, seule la liste gardée par wpa_supplicant comptait.
+- L'économie d'énergie de la radio est coupée dès que la carte est prête.
+- Le journal compare chaque minute ce que voient wpa_supplicant et le noyau. Dans le Terminal, `sudo iw dev wlan0 scan | grep -E "SSID|signal"` lance une recherche complète et montre ce que la carte entend vraiment.
+
 ## Bêta 25
 
 **Câble Ethernet et partage USB : refaits**

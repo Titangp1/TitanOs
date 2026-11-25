@@ -156,8 +156,8 @@ static bool mount_key(void) {
     mkdirs("/media/titanos");
     char dev[64];
     snprintf(dev, sizeof dev, "/dev/%s", key_dev);
-    int r = sys_mount(dev, "/media/titanos", "vfat", 1024 /* MS_NOATIME */, "iocharset=utf8,shortname=mixed,flush");
-    if (r != 0) r = sys_mount(dev, "/media/titanos", "vfat", 1024, "");
+    int r = sys_mount(dev, "/media/titanos", "vfat", 1024 /* MS_NOATIME */, "iocharset=utf8,shortname=mixed,flush,uid=1000,gid=1000,fmask=0022,dmask=0022");
+    if (r != 0) r = sys_mount(dev, "/media/titanos", "vfat", 1024, "uid=1000,gid=1000");
     klog("clé TITANOS (%s) : %s", key_dev, r == 0 ? "montée" : "échec du montage");
     return r == 0;
 }
@@ -250,7 +250,7 @@ static bool setup_apps(void (*say)(const char *)) {
     run_wait(fsck);
     mkdirs("/.titan");
     if (sys_mount(pdev, "/.titan", "ext4", 1024 /* MS_NOATIME */, "") != 0) { klog("partition des applications : montage impossible"); return false; }
-    static const char *const dirs[] = { "usr", "bin", "sbin", "lib", "etc", "var", "root" };
+    static const char *const dirs[] = { "usr", "bin", "sbin", "lib", "etc", "var", "root", "home" };
     int okn = 0;
     for (int i = 0; i < countof(dirs); i++) {
         char up[64], wk[64], tgt[16], opts[200];
@@ -389,14 +389,57 @@ static void prepare_home(bool on_key, const char *storage) {
     if (first) {
         char p[256];
         snprintf(p, sizeof p, "%s/Bienvenue.txt", home);
-        const char *t = "Bienvenue dans TitanOs (bêta 25) !\n\n"
+        const char *t = "Bienvenue dans TitanOs (bêta 26) !\n\n"
                         "TitanOs tourne sur le noyau Linux : Linux fournit les pilotes (écran, clavier,\n"
                         "USB, Wi-Fi, son...), et tout le reste est écrit pour TitanOs.\n\n"
                         "Vos fichiers sont gardés sur la clé USB, dans le dossier Utilisateur.\n"
-                        "Dans le Terminal : « aide » liste les commandes, et « apk add nom »\n"
-                        "installe une application Linux (par exemple : apk add htop).\n";
+                        "Dans le Terminal : « aide » liste les commandes, et « sudo apk add nom »\n"
+                        "installe une application Linux (par exemple : sudo apk add htop).\n";
         plat_writefile(p, t, strlen(t));
     }
+}
+
+/* Compte « titan » (uid 1000) pour le Terminal : sans droits d'administrateur. Il est
+ * ajouté à /etc/passwd et /etc/group s'il manque (ces fichiers peuvent venir de l'espace
+ * des applications, modifiés par apk). Son dossier /home/titan contient des raccourcis vers
+ * les dossiers de l'utilisateur (Documents, Images...). */
+static void add_line(const char *file, const char *prefix, const char *line) {
+    char buf[8192];
+    long n = read_file(file, buf, sizeof buf);
+    if (n > 0) {
+        size_t pl = strlen(prefix);
+        for (char *l = buf; l && *l; l = strchr(l, '\n') ? strchr(l, '\n') + 1 : NULL)
+            if (!strncmp(l, prefix, pl)) return;
+    }
+    int fd = sys_open(file, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0644);
+    if (fd < 0) return;
+    if (n > 0 && buf[n - 1] != '\n') sys_write(fd, "\n", 1);
+    sys_write(fd, line, strlen(line));
+    sys_close(fd);
+}
+
+static void ensure_user(const char *home) {
+    add_line("/etc/passwd", "titan:", "titan:x:1000:1000:Titan:/home/titan:/bin/sh\n");
+    add_line("/etc/group", "titan:", "titan:x:1000:\n");
+    add_line("/etc/group", "wheel:", "wheel:x:10:titan\n");
+    add_line("/etc/group", "audio:", "audio:x:18:titan\n");
+    add_line("/etc/group", "video:", "video:x:27:titan\n");
+    mkdirs("/home/titan");
+    sc3(__NR_chown, (long)"/home/titan", 1000, 1000);
+    sc2(__NR_chmod, (long)"/home/titan", 0755);
+    sc2(__NR_chmod, (long)"/root", 0700);                 /* le dossier de root n'est plus lisible par titan */
+    static const char *const sub[] = { "Documents", "Images", "Musique", "Téléchargements", "Vidéos" };
+    for (int i = 0; i < countof(sub); i++) {
+        char t[256], l[256];
+        snprintf(t, sizeof t, "%s/%s", home, sub[i]);
+        snprintf(l, sizeof l, "/home/titan/%s", sub[i]);
+        mkdirs(t);
+        struct stat st;
+        if (sys_stat(l, &st) != 0 && sc4(__NR_newfstatat, AT_FDCWD, (long)l, (long)&st, 0x100 /* AT_SYMLINK_NOFOLLOW */) != 0)
+            sys_symlink(t, l);
+    }
+    struct stat st;
+    if (sc4(__NR_newfstatat, AT_FDCWD, (long)"/home/titan/Fichiers", (long)&st, 0x100) != 0) sys_symlink(home, "/home/titan/Fichiers");
 }
 
 static void upgrade_display(void) {
@@ -532,6 +575,7 @@ static int session_main(void) {
     upgrade_display();
     core_hold(false);
     prepare_home(on_key, storage);
+    ensure_user(plat_home());
     settings_load();
     if (g_set.brightness >= 0) plat_brightness(g_set.brightness);
     audio_start();
@@ -735,12 +779,24 @@ static int init_main(void) {
     }
 }
 
+int sudo_main(int argc, char **argv);
+
 int start_c(long *sp) {
     int argc = (int)sp[0];
     char **argv = (char **)(sp + 1);
     g_envp = argv + argc + 1;
     static char *default_env[] = { "PATH=/bin:/sbin:/usr/bin:/usr/sbin", "HOME=/root", "TERM=linux", NULL };
     if (!g_envp[0]) g_envp = default_env;
+    /* lancé « setuid root » (/usr/bin/sudo), ou sous le nom sudo : rien d'autre que sudo */
+    long uid = sc0(__NR_getuid), euid = sc0(__NR_geteuid);
+    const char *base = argc > 0 && argv[0] ? strrchr(argv[0], '/') : NULL;
+    base = base ? base + 1 : argc > 0 && argv[0] ? argv[0] : "";
+    if (uid != euid || !strcmp(base, "sudo")) sys_exit(sudo_main(argc, argv));
+    if (uid != 0) {                                   /* le système lui-même : pas pour un utilisateur */
+        const char *m = "TitanOs : ce programme est le système lui-même.\n";
+        sys_write(2, m, strlen(m));
+        sys_exit(1);
+    }
     if (sys_getpid() == 1) sys_exit(init_main());
     sys_exit(session_main());
 }

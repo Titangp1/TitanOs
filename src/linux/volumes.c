@@ -104,7 +104,9 @@ static void part_cb(const char *name, int type, void *ctx) {
     char dev[48];
     snprintf(dev, sizeof dev, "/dev/%s", name);
     static const char *const fs[] = { "vfat", "exfat", "ntfs3", "ext4" };
-    static const char *const opts[] = { "iocharset=utf8,shortname=mixed,flush", "iocharset=utf8", "iocharset=utf8", "" };
+    static const char *const opts[] = { "iocharset=utf8,shortname=mixed,flush,uid=1000,gid=1000,fmask=0022,dmask=0022",
+                                        "iocharset=utf8,uid=1000,gid=1000,fmask=0022,dmask=0022",
+                                        "iocharset=utf8,uid=1000,gid=1000,fmask=0022,dmask=0022", "" };
     for (int i = 0; i < countof(fs); i++) {
         module_load(fs[i]);
         if (sys_mount(dev, v->path, fs[i], 1024 /* MS_NOATIME */, opts[i]) == 0) {

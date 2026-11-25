@@ -154,17 +154,19 @@ bool plat_exists(const char *path, bool *dir) {
 }
 
 /* ---------------- processus : terminal et commandes ---------------- */
+static bool user_ok(void) { return path_exists("/home/titan"); }
 static char *const *make_env(void) {
     static char henv[300];
-    static char *env[10];
-    snprintf(henv, sizeof henv, "HOME=%s", home_dir);
+    static char *env[12];
+    snprintf(henv, sizeof henv, "HOME=%s", user_ok() ? "/home/titan" : home_dir);
     int k = 0;
-    env[k++] = "PATH=/bin:/sbin:/usr/bin:/usr/sbin";
+    env[k++] = "PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
     env[k++] = henv;
     env[k++] = "TERM=xterm-256color";
     env[k++] = "USER=titan";
     env[k++] = "LOGNAME=titan";
-    env[k++] = "SHELL=/bin/sh";
+    env[k++] = path_exists("/bin/bash") ? "SHELL=/bin/bash" : "SHELL=/bin/sh";
+    env[k++] = "EDITOR=nano";
     env[k++] = "LANG=fr_FR.UTF-8";
     env[k++] = "LC_ALL=fr_FR.UTF-8";
     env[k] = NULL;
@@ -211,11 +213,20 @@ int plat_pty_open(int cols, int rows) {
         int s = sys_open(slave, O_RDWR, 0);
         if (s < 0) sys_exit(126);
         sys_ioctl(s, TIOCSCTTY, 0);
+        /* le Terminal n'est pas root : compte titan (uid 1000), sudo pour l'administration */
+        if (user_ok()) {
+            sc3(__NR_fchown, s, 1000, 5 /* tty */);
+            static const uint32_t groups[] = { 1000, 10 /* wheel */, 18 /* audio */, 27 /* video */ };
+            sc2(__NR_setgroups, countof(groups), (long)groups);
+            if (sc3(__NR_setresgid, 1000, 1000, 1000) != 0 || sc3(__NR_setresuid, 1000, 1000, 1000) != 0) sys_exit(126);
+        }
         sys_dup2(s, 0); sys_dup2(s, 1); sys_dup2(s, 2);
         if (s > 2) sys_close(s);
-        sys_chdir(home_dir);
-        char *argv[] = { "-sh", NULL };
-        sys_execve("/bin/sh", argv, env);
+        if (!user_ok() || sys_chdir("/home/titan") != 0) sys_chdir(home_dir);
+        bool bash = path_exists("/bin/bash");
+        char *argv[] = { bash ? "-bash" : "-sh", NULL };
+        sys_execve(bash ? "/bin/bash" : "/bin/sh", argv, env);
+        sys_execve("/bin/sh", (char *[]){ "-sh", NULL }, env);
         sys_exit(127);
     }
     ptys[id] = (pty_t){ pid, fd, true, false };

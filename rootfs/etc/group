@@ -1,2 +1,6 @@
 root:x:0:
 tty:x:5:
+wheel:x:10:titan
+audio:x:18:titan
+video:x:27:titan
+titan:x:1000:

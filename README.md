@@ -42,7 +42,8 @@ Quelques programmes d'Alpine sont embarqués pour ce qui ne se réinvente pas :
 | **Intégration au portable** | Batterie, touches Fn (luminosité, volume), couvercle, bouton d'alimentation, mise en veille, températures, interrupteur Wi-Fi du VAIO. |
 | **Navigateur web** | Chromium, la base libre de Google Chrome, s'installe tout seul dès la première connexion à Internet et s'ouvre dans une fenêtre TitanOs. Les téléchargements vont dans *Téléchargements*, le son passe par le haut-parleur. |
 | **Logithèque** | LibreOffice, VS Code, Discord, GIMP, Python et Node.js s'installent en un clic. Chaque application graphique a sa propre fenêtre et rejoint le menu Démarrer avec son icône. |
-| **Applications Linux** | `apk add htop` dans le Terminal installe un programme d'Alpine. Il reste installé dans l'espace des applications créé au premier démarrage. |
+| **Applications Linux** | `sudo apk add htop` dans le Terminal installe un programme d'Alpine. Il reste installé dans l'espace des applications créé au premier démarrage. |
+| **Sécurité** | Le Terminal tourne sous le compte `titan`, sans droits d'administrateur. `sudo` demande le mot de passe de session ; sans mot de passe défini, il refuse. |
 | **Pointeur** | Flèche noire bordée de blanc avec une ombre douce, affichée par la carte graphique : elle suit la souris sans attendre l'image suivante. Elle change de forme sur le texte, les coins de redimensionnement, les liens des pages web. |
 
 <table>
@@ -84,7 +85,7 @@ Il faut 512 Mo de mémoire au minimum. Une fois TitanOs installé, les nouvelles
 | **Chromium** | Navigateur web complet (onglets, favoris, mots de passe, téléchargements, vidéos avec le son), avec la disposition de clavier de TitanOs. |
 | **Logithèque** | Installe et désinstalle LibreOffice, VS Code, Discord (Flathub), GIMP, Python 3 et Node.js. Les installations se font une à la fois, avec une barre de progression. |
 | **Fichiers** | Dossiers et fichiers : créer, renommer (F2), dupliquer, supprimer avec confirmation. Chaque fichier s'ouvre avec la bonne application : textes dans le Bloc-notes, images dans la visionneuse, PDF, vidéos, musique et pages web dans Chromium. Les archives (zip, tar.gz, tar.xz…) s'extraient d'un double-clic. Les clés USB branchées apparaissent, avec un bouton *Éjecter*. |
-| **Terminal** | Vrai terminal (VT100/xterm, 256 couleurs, historique). `aide` liste les commandes. |
+| **Terminal** | Vrai terminal (VT100/xterm, 256 couleurs) avec bash, sous le compte `titan`. `sudo` pour l'administration (mot de passe de session). Commandes de BusyBox, plus lsblk, lscpu, lspci, lsusb, findmnt, nano, less, htop, tree, zip, iw. `aide` les présente. |
 | **Bloc-notes** | Édition UTF-8, sélection, copier/coller, Ctrl+S / Ctrl+O. Avertit avant de fermer un texte non enregistré. |
 | **Image** | Visionneuse JPEG (séquentiel et progressif, orientation EXIF), PNG, GIF, BMP et PPM, ajustée à la fenêtre ; ← → pour l'image suivante. |
 | **Calculatrice** | À la souris ou au clavier. |
