@@ -107,7 +107,8 @@ void ui_field(canvas_t *c, rect_t r, field_t *f, const char *placeholder) {
     }
     int cw = text_width_n(&font_body, txt, cur), shift = 0;
     if (cw > r.w - 34) shift = cw - (r.w - 34);
-    if (!f->s[0] && placeholder) {
+    if (!f->s[0] && placeholder && f->plain) text_draw(c, &font_body, r.x + 14, ty, placeholder, C_MUTED);
+    else if (!f->s[0] && placeholder) {
         draw_icon(c, ICON_SEARCH, r.x + 12, r.y + (r.h - 18) / 2.0f, 18);
         text_draw(c, &font_body, r.x + 38, ty, placeholder, C_MUTED);
     } else {

@@ -5,7 +5,7 @@
 <p>
 <a href="https://titangp1.github.io/TitanOs/"><img src="https://img.shields.io/badge/Ouvrir%20le%20site-6d28d9?style=flat-square" alt="Ouvrir le site"></a>
 <a href="https://github.com/Titangp1/TitanOs/releases/latest"><img src="https://img.shields.io/badge/T%C3%A9l%C3%A9charger-1d6fd1?style=flat-square&logo=github&logoColor=white" alt="Télécharger"></a>
-<img src="https://img.shields.io/badge/version-0.34.0--b%C3%AAta-1f2937?style=flat-square" alt="Version 0.34.0 bêta">
+<img src="https://img.shields.io/badge/version-0.35.0--b%C3%AAta-1f2937?style=flat-square" alt="Version 0.35.0 bêta">
 <img src="https://img.shields.io/badge/licence-GPL--3.0-a77d2f?style=flat-square" alt="Licence GPL-3.0">
 <img src="https://img.shields.io/badge/base-Debian%2013%20%C2%B7%20Linux%206.18-a80030?style=flat-square&logo=debian&logoColor=white" alt="Base Debian 13, Linux 6.18">
 <img src="https://img.shields.io/badge/PC-Sony%20VAIO%20F%20%C2%B7%20x86--64-6d28d9?style=flat-square" alt="Sony VAIO F, x86-64">
@@ -82,6 +82,7 @@ Debian s'installe tout seul au premier démarrage, depuis la clé, avec une barr
 
 | | |
 |---|---|
+| **Accueil du premier démarrage** | Comme sous Windows : clavier, fuseau horaire, Wi-Fi, nom, mot de passe, fond d'écran et couleur, en quelques écrans. |
 | **Clé d'installation** | La clé ne contient plus le système : elle installe TitanOs sur le disque de l'ordinateur, avec un assistant (disque, confirmation, progression). Rien ne se télécharge tout seul : les applications s'installent dans le Terminal. |
 | **Base Debian** | Debian 13 sous le bureau de TitanOs : apt, NetworkManager, PipeWire, systemd. Chrome, Discord et VS Code s'installent avec leur paquet officiel. Installée toute seule au premier démarrage. |
 | **Fenêtres** | Ancrage sur les moitiés de l'écran avec aperçu, vue d'ensemble animée de toutes les fenêtres. |
@@ -103,6 +104,13 @@ TitanOs s'installe comme Windows : une **clé d'installation** démarre un assis
    - **PC récent (UEFI)** : désactivez *Secure Boot*.
 4. L'assistant d'installation s'ouvre. Choisissez le disque (16 Go au moins), confirmez, puis attendez la fin de la copie. **Le disque choisi est entièrement effacé**, Windows compris.
 5. Retirez la clé et redémarrez. Au premier démarrage, TitanOs installe sa base Debian, avec une barre de progression : quelques minutes, une seule fois.
+6. L'**accueil** s'ouvre ensuite, comme sous Windows :
+   - clavier (AZERTY ou QWERTY) et fuseau horaire ;
+   - connexion Wi-Fi ;
+   - votre nom et votre mot de passe ;
+   - fond d'écran et couleur d'accent.
+
+   Puis le bureau apparaît.
 
 Le disque est partagé en deux :
 - **TitanOs et vos fichiers** (FAT32) : la plus grande partie ;
@@ -271,7 +279,8 @@ TitanOs suit un **numéro de version sémantique** `majeur.mineur.correctif`, co
 
 | Version | Tag Git | Nom affiché | Statut |
 |---|---|---|---|
-| **0.34.0** | `v0.34.0-beta.34` | TitanOs Bêta 34 | dernière version : clé d'installation |
+| **0.35.0** | `v0.35.0-beta.35` | TitanOs Bêta 35 | dernière version : accueil du premier démarrage |
+| 0.34.0 | `v0.34.0-beta.34` | TitanOs Bêta 34 | clé d'installation |
 | 0.33.0 | `v0.33.0-beta.33` | TitanOs Bêta 33 | base Debian |
 | 0.32.0 | `v0.32.0-beta.32` | TitanOs Bêta 32 | |
 
@@ -280,7 +289,7 @@ TitanOs suit un **numéro de version sémantique** `majeur.mineur.correctif`, co
 - **correctif** : pour une correction publiée sans nouvelle fonction (`0.32.1`...).
 
 Chaque version publiée contient :
-- `titanos-installeur-beta34.img.zip`, la clé d'installation à écrire avec Rufus, balenaEtcher ou `dd` ;
+- `titanos-installeur-beta35.img.zip`, la clé d'installation à écrire avec Rufus, balenaEtcher ou `dd` ;
 - `titanos-maj.tar.gz`, la mise à jour par Internet ou par clé USB ;
 - `VERSION`, le numéro de bêta, lu par la recherche automatique des mises à jour ;
 - `DEBIAN.TXZ` et `DEBS.TAR`, la base Debian, téléchargée par les TitanOs installés avant la bêta 33.

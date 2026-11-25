@@ -2,6 +2,27 @@
 
 Toutes les versions sont dans les [versions publiées](../../releases). Depuis la bêta 6, TitanOs se met à jour tout seul.
 
+## Bêta 35 (0.35.0)
+
+**Accueil du premier démarrage, comme Windows**
+
+Juste après l'installation, avant d'ouvrir le bureau, TitanOs vous guide en quelques écrans :
+1. **Bonjour** : le logo et un mot de bienvenue.
+2. **Clavier** : AZERTY ou QWERTY, avec une zone pour essayer.
+3. **Fuseau horaire** : Paris par défaut, 16 fuseaux au choix.
+4. **Internet** :
+   - les réseaux Wi-Fi visibles, avec leur force et leur sécurité ;
+   - mot de passe, puis « Se connecter » ;
+   - ou « Continuer sans Internet ».
+5. **Votre nom** : il s'affiche sur l'écran de verrouillage.
+6. **Mot de passe**, tapé deux fois. Il protège la session et sudo. « Continuer sans mot de passe » reste possible.
+7. **Style** : fond d'écran et couleur d'accent, appliqués en direct derrière l'assistant.
+8. **« Tout est prêt »** : les crêtes s'animent, puis le bureau apparaît en fondu.
+
+L'accueil ne s'ouvre que sur un TitanOs tout neuf. Les TitanOs déjà configurés gardent leurs réglages. S'il est interrompu (coupure, redémarrage), il reprend au démarrage suivant.
+
+**Champs de texte** : la loupe n'apparaît plus que dans les champs de recherche.
+
 ## Bêta 34 (0.34.0)
 
 **Clé d'installation, comme Windows**

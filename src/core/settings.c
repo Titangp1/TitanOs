@@ -187,6 +187,7 @@ static void defaults(void) {
     g_set.brightness = -1;
     g_set.glass = 1;
     g_set.pointer = 3;
+    g_set.welcome = 1;
     static const int def[] = { ICON_FILES, ICON_BROWSER, ICON_TERMINAL, ICON_NOTES, ICON_SETTINGS, ICON_SYSTEM, ICON_ABOUT };
     g_set.ndesk = 0;
     for (int i = 0; i < (int)(sizeof def / sizeof def[0]); i++) {
@@ -201,7 +202,7 @@ void settings_load(void) {
     defaults();
     char *data;
     size_t len;
-    if (plat_readfile(plat_config_path(), &data, &len) != 0) return;
+    if (plat_readfile(plat_config_path(), &data, &len) != 0) { g_set.welcome = 0; return; }   /* tout nouveau : accueil */
     char *p = data, *end = data + len;
     while (p < end) {
         char *nl = p;
@@ -219,6 +220,7 @@ void settings_load(void) {
             else if (!strcmp(k, "nuit")) g_set.night = CLAMP(n, 0, 2);
             else if (!strcmp(k, "clavier")) g_set.layout = !strcmp(v, "us");
             else if (!strcmp(k, "fuseau")) g_set.tz = CLAMP(n, 0, tz_count - 1);
+            else if (!strcmp(k, "accueil")) g_set.welcome = n != 0;
             else if (!strcmp(k, "horloge_locale")) g_set.rtc_local = n != 0;
             else if (!strcmp(k, "luminosite")) g_set.brightness = CLAMP(n, -1, 100);
             else if (!strcmp(k, "verre")) g_set.glass = CLAMP(n, 0, 2);
@@ -390,9 +392,9 @@ void settings_save(void) {
     static char buf[8192];
     int n = snprintf(buf, sizeof buf,
                      "# Réglages de TitanOs\nfond=%d\naccent=%d\nutilisateur=%s\nsecondes=%d\nnuit=%d\nclavier=%s\n"
-                     "fuseau=%d\nhorloge_locale=%d\nluminosite=%d\nverre=%d\nsons=%d\nvolume=%d\npointeur=%d\nmot_de_passe=%s\n",
+                     "fuseau=%d\nhorloge_locale=%d\nluminosite=%d\nverre=%d\nsons=%d\nvolume=%d\npointeur=%d\nmot_de_passe=%s\naccueil=%d\n",
                      g_set.wallpaper, g_set.accent, g_set.user, g_set.seconds, g_set.night, g_set.layout ? "us" : "fr",
-                     g_set.tz, g_set.rtc_local, g_set.brightness, g_set.glass, g_set.sounds, g_set.volume, g_set.pointer, g_set.pass);
+                     g_set.tz, g_set.rtc_local, g_set.brightness, g_set.glass, g_set.sounds, g_set.volume, g_set.pointer, g_set.pass, g_set.welcome);
     n += snprintf(buf + n, sizeof buf - (size_t)n, "bureau=");
     for (int i = 0; i < g_set.ndesk; i++) {
         const desk_item_t *d = &g_set.desk[i];

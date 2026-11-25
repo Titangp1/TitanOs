@@ -1481,6 +1481,8 @@ static void draw_peaks(int x0, int y0, float t) {
     }
 }
 
+void wm_peaks(int x, int y) { draw_peaks(x, y, (float)now / 1000.0f); }
+
 static void draw_splash(void) {
     rect_t clip = T->clip;
     gfx_fill_grad(T, R(0, 0, scr_w, scr_h), OPAQUE(0x070B18), OPAQUE(0x161237));
@@ -2039,7 +2041,7 @@ static void mouse_button(const event_t *e) {
         return;
     }
     if (mode == MODE_SETUP) {
-        if (e->down && e->button == BTN_LEFT && setup_click(mx, my)) damage(setup_rect(scr_w, scr_h), 0);
+        if (e->down && e->button == BTN_LEFT && setup_click(mx, my)) damage_all();    /* le fond peut changer */
         return;
     }
     if (mode != MODE_DESK) return;
@@ -2419,6 +2421,19 @@ void core_splash(const char *step, int percent) {
     compose();
 }
 
+/* fin de l'accueil du premier démarrage : réglages enregistrés, le bureau apparaît en fondu */
+void wm_welcome_done(void) {
+    g_set.welcome = 1;
+    settings_save();
+    wm_theme_changed();
+    snapshot();
+    mode = MODE_DESK;
+    trans = TR_FADE;
+    trans_t0 = now;
+    damage_all();
+    sound_play(SFX_UNLOCK);
+}
+
 /* clé d'installation : l'assistant à la place de l'écran de verrouillage */
 void core_start_setup(void) {
     now = plat_ms();
@@ -2439,6 +2454,7 @@ void core_start(void) {
     if (g_set.volume >= 0) plat_volume(g_set.volume);
     snapshot();                     /* l'écran de démarrage s'efface sur l'écran de verrouillage */
     mode = MODE_LOCK;
+    if (!g_set.welcome) { welcome_init(); mode = MODE_SETUP; }   /* premier démarrage : l'accueil */
     trans = TR_FADE;
     trans_t0 = now;
     dock_build();
@@ -2558,6 +2574,7 @@ int core_frame(void) {
         now_dt = dt;
         bool a = setup_tick();
         if (a) damage(setup_rect(scr_w, scr_h), 0);
+        if (wall_id != g_set.wallpaper) damage_all();
         if (trans) damage_all();
         cursor_update();
         if (ndmg) compose();

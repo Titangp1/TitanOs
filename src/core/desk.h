@@ -55,6 +55,7 @@ typedef struct {
     int  volume;          /* volume général, 0-100 */
     int  pointer;         /* vitesse du pointeur, 1-5 */
     char pass[64];        /* empreinte du mot de passe de session (vide : aucun) */
+    int  welcome;         /* 0 : premier démarrage, l'accueil (configuration) reste à faire */
     desk_item_t desk[DESK_MAX];   /* raccourcis du bureau ; col = -1 : rangé automatiquement */
     int  ndesk;
 } settings_t;
@@ -169,6 +170,9 @@ bool   setup_motion(int x, int y);
 bool   setup_click(int x, int y);
 bool   setup_key(const event_t *e);
 bool   setup_tick(void);
+void   welcome_init(void);                 /* accueil du premier démarrage (même écran, autres étapes) */
+void   wm_welcome_done(void);              /* fin de l'accueil : le bureau s'ouvre */
+void   wm_peaks(int x, int y);             /* les « crêtes » animées de l'écran de démarrage (128 x 32) */
 bool ui_progress(canvas_t *c, rect_t r, ui_progress_t *p, int percent);
 void ui_icon_button(canvas_t *c, rect_t r, int icon, bool hover);
 void ui_toggle(canvas_t *c, rect_t r, bool on);
@@ -180,7 +184,7 @@ void ui_scrollbar(canvas_t *c, rect_t r, int total, int visible, int offset);
 int  ui_wrap(const font_t *f, const char *s, int maxw, int *starts, int *lens, int max);
 
 /* champ de texte d'une ligne */
-typedef struct { char s[256]; int cur; bool focus, secret; } field_t;
+typedef struct { char s[256]; int cur; bool focus, secret, plain; } field_t;   /* plain : sans loupe (pas une recherche) */
 void ui_field(canvas_t *c, rect_t r, field_t *f, const char *placeholder);
 bool ui_field_key(field_t *f, const event_t *e);            /* true si le texte a changé */
 void ui_field_set(field_t *f, const char *s);
