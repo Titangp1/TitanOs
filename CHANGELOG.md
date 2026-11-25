@@ -2,6 +2,19 @@
 
 Toutes les versions sont dans les [versions publiées](../../releases). Depuis la bêta 6, TitanOs se met à jour tout seul.
 
+## Bêta 30
+
+**Câble Ethernet**
+- Le rapport de la console montre que la carte Marvell (pilote `sky2`) ne voit jamais le câble branché. Sur les VAIO, ses interruptions MSI se perdent : le changement de lien n'arrive jamais. Le pilote est maintenant chargé avec `disable_msi=1` (interruptions classiques), le correctif connu pour ces cartes.
+- Si aucun lien n'apparaît, la carte est relancée toutes les 30 s pour réveiller sa partie physique.
+- Note : certains réseaux d'école ou d'entreprise demandent une identification aussi sur le câble (802.1X). La console le montrera si c'est le cas.
+
+**Wi-Fi**
+- Le rapport confirme que la carte entend bien les réseaux (47 bornes). Les réseaux d'école (QUEST-…, JEDHA-…) demandent souvent un identifiant et un mot de passe : TitanOs les demande depuis la bêta 27.
+
+**Console réseau**
+- Les accents s'affichaient en codes (`\xc3\xa9`) : ils sont maintenant remis en clair.
+
 ## Bêta 29
 
 **Connexion Wi-Fi : un vrai résultat**

@@ -1070,7 +1070,7 @@ gdtr:
 m_diskarg: .asciz " titanos.disk="
 m_vbearg:  .asciz " titanos.vbe="
 vbe_list:  .fill 220, 1, 0
-m_hello:  .asciz "TitanOs beta 29 - demarrage BIOS\r\n"
+m_hello:  .asciz "TitanOs beta 30 - demarrage BIOS\r\n"
 m_kernel: .asciz "  Noyau Linux "
 m_initrd: .asciz "  Systeme TitanOs "
 m_ok:     .asciz " OK\r\n"

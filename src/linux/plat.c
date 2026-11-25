@@ -493,7 +493,16 @@ int plat_netlog_next(char *line, int n, uint64_t *usec) {
         if (nl) *nl = 0;
         if (!net_line(msg)) continue;
         if (str_starts(msg, "titanos: ")) msg += 9;
-        strlcpy(line, msg, (size_t)n);
+        int k = 0;
+        for (const char *q = msg; *q && k < n - 1; ) {
+            if (q[0] == '\\' && q[1] == 'x' && q[2] && q[3]) {
+                char h[3] = { q[2], q[3], 0 };
+                char b = (char)strtol(h, NULL, 16);
+                line[k++] = b ? b : '?';
+                q += 4;
+            } else line[k++] = *q++;
+        }
+        line[k] = 0;
         *usec = c2 ? (uint64_t)strtol(c2 + 1, NULL, 10) : 0;
         return 1;
     }

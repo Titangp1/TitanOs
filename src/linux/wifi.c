@@ -40,7 +40,7 @@ static void gov_cb(const char *name, int type, void *ctx) {
 /* Le veilleur surveille le lien de chaque carte filaire : câble branché -> adresse demandée
  * aussitôt ; débranché -> adresse retirée (Internet passe alors par la carte suivante,
  * voir /etc/udhcpc.script). */
-typedef struct { char name[16]; int carrier; bool told; } wired_t;
+typedef struct { char name[16]; int carrier; bool told; uint64_t kick; } wired_t;
 static wired_t wired[8];
 static int nwired;
 
@@ -125,6 +125,18 @@ static void wired_cb(const char *name, int type, void *ctx) {
     if_up(name);
     snprintf(p, sizeof p, "/sys/class/net/%s/carrier", name);
     int c = read_file(p, v, sizeof v) > 0 && v[0] == '1';
+    if (!c && plat_ms() > w->kick) {                    /* toujours rien : interface relancée (le PHY se réveille) */
+        if (w->kick) {
+            int s = sys_socket(2, 2 | O_CLOEXEC, 0);
+            if (s >= 0) {
+                struct { char name[16]; short flags; char pad[22]; } ifr = { 0 };
+                strlcpy(ifr.name, name, sizeof ifr.name);
+                if (sys_ioctl(s, 0x8913, &ifr) == 0) { ifr.flags &= ~1; sys_ioctl(s, 0x8914, &ifr); ifr.flags |= 1; sys_ioctl(s, 0x8914, &ifr); }
+                sys_close(s);
+            }
+        }
+        w->kick = plat_ms() + 30000;
+    }
     if (c == w->carrier) return;
     bool usb = false;
     char link[256];

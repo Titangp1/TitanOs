@@ -113,6 +113,9 @@ static bool insmod(const char *relpath) {
     if (strstr(relpath, "/iwlwifi.ko")) params = "power_save=0 led_mode=1 bt_coex_active=0";
     else if (strstr(relpath, "/iwldvm.ko")) params = "force_cam=1";
     else if (strstr(relpath, "/cfg80211.ko")) params = "ieee80211_regdom=FR";        /* canaux et puissance de la France */
+    /* Ethernet Marvell (sky2) : sur les VAIO, les interruptions MSI se perdent et le câble
+     * n'est jamais vu comme branché ; les interruptions classiques (INTx) marchent */
+    else if (strstr(relpath, "/sky2.ko")) params = "disable_msi=1";
     int r = sys_finit_module(fd, params, 0);
     sys_close(fd);
     return r == 0 || r == -EEXIST;
