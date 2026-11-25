@@ -640,6 +640,15 @@ static void boot_worker(int out) {
     }
     if (on_key) {
         start_journal();
+        /* clé d'installation : ni espace des applications ni Debian sur la clé, l'assistant
+         * d'installation s'ouvre */
+        if (path_exists("/media/titanos/TITANOS/INSTALL")) {
+            tell("I\n");
+            tell("KClé d'installation\n");
+            say("Ouverture de l'installation…");
+            tell("D\n");
+            return;
+        }
         say("Ouverture de vos fichiers…");
         if (debian_stage()) {                /* base Debian prête : systemd prend le relais */
             say("Ouverture de Debian…");
@@ -870,7 +879,7 @@ static int session_main(void) {
     /* le travail de démarrage se fait à côté ; ici, les crêtes s'animent */
     int p[2];
     char storage[96] = "Clé USB TITANOS";
-    bool on_key = false, to_debian = false;
+    bool on_key = false, to_debian = false, installer = false;
     static char warn[200];                   /* message à montrer une fois le bureau ouvert */
     if (sys_pipe2(p, O_CLOEXEC) == 0) {
         int pid = sys_fork();
@@ -893,6 +902,7 @@ static int session_main(void) {
                 if (buf[0] == 'S') core_splash(buf + 1, -1);
                 else if (buf[0] == 'P') { char *sp = strchr(buf, ' '); core_splash(sp ? sp + 1 : "", atoi(buf + 1)); }
                 else if (buf[0] == 'R') to_debian = true;
+                else if (buf[0] == 'I') installer = true;
                 else if (buf[0] == 'W') strlcpy(warn, buf + 1, sizeof warn);
                 else if (buf[0] == 'G') { upgrade_display(); if (strcmp(display_driver(), "simpledrm")) { hold = false; core_hold(false); } }
                 else if (buf[0] == 'K') { on_key = true; strlcpy(storage, buf + 1, sizeof storage); }
@@ -914,20 +924,28 @@ static int session_main(void) {
     }
     upgrade_display();
     core_hold(false);
-    prepare_home(on_key, storage);
-    ensure_user(plat_home());
-    settings_load();
-    if (g_set.brightness >= 0) plat_brightness(g_set.brightness);
-    audio_start();
-    if (!g_hosted) machine_id();
-    hw_start();                              /* Wi-Fi et batterie : processus séparé */
-    if (!g_hosted) net_autostart();          /* Debian : NetworkManager allume les cartes */
-    else netlog_forward();
+    if (installer) {                         /* clé d'installation : rien n'est écrit sur la clé */
+        mkdirs("/run/installation");
+        plat_set_storage("/run/installation", "/run/installation/titanos.cfg", "Clé d'installation");
+        settings_load();
+        audio_start();
+    } else {
+        prepare_home(on_key, storage);
+        ensure_user(plat_home());
+        settings_load();
+        if (g_set.brightness >= 0) plat_brightness(g_set.brightness);
+        audio_start();
+        if (!g_hosted) machine_id();
+        hw_start();                          /* Wi-Fi et batterie : processus séparé */
+        if (!g_hosted) net_autostart();      /* Debian : NetworkManager allume les cartes */
+        else netlog_forward();
+    }
     diag_key = on_key ? "montée" : "introuvable";
     module_load("evdev");                    /* au cas où le processus de démarrage aurait échoué */
     module_load("psmouse");
     input_scan();
-    core_start();
+    if (installer) core_start_setup();
+    else core_start();
     if (!on_key) wm_toast("Clé TITANOS introuvable : vos fichiers ne seront pas conservés.");
     else if (warn[0]) wm_toast(warn);
 

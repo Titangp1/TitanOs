@@ -4,7 +4,7 @@
 
 <p>
 <a href="https://github.com/Titangp1/TitanOs/releases/latest"><img src="https://img.shields.io/badge/T%C3%A9l%C3%A9charger-1d6fd1?style=flat-square&logo=github&logoColor=white" alt="Télécharger"></a>
-<img src="https://img.shields.io/badge/version-0.33.0--b%C3%AAta-1f2937?style=flat-square" alt="Version 0.33.0 bêta">
+<img src="https://img.shields.io/badge/version-0.34.0--b%C3%AAta-1f2937?style=flat-square" alt="Version 0.34.0 bêta">
 <img src="https://img.shields.io/badge/licence-GPL--3.0-a77d2f?style=flat-square" alt="Licence GPL-3.0">
 <img src="https://img.shields.io/badge/base-Debian%2013%20%C2%B7%20Linux%206.18-a80030?style=flat-square&logo=debian&logoColor=white" alt="Base Debian 13, Linux 6.18">
 <img src="https://img.shields.io/badge/PC-Sony%20VAIO%20F%20%C2%B7%20x86--64-6d28d9?style=flat-square" alt="Sony VAIO F, x86-64">
@@ -50,9 +50,9 @@ Debian s'installe tout seul au premier démarrage, depuis la clé, avec une barr
 | **Fluide à 60 Hz** | Le bureau dessine dans une image en mémoire vidéo pendant que l'autre est affichée, et la carte graphique bascule au rafraîchissement de l'écran : pas de déchirure. |
 | **Animations** | Les fenêtres s'ouvrent avec un léger zoom, se réduisent vers leur icône du dock et en reviennent. L'agrandissement est animé ; les menus et les notifications apparaissent en fondu. |
 | **Mises à jour automatiques** | Une fois en ligne, TitanOs cherche une version plus récente ici, la télécharge en HTTPS, vérifie ses sommes SHA-256 et l'installe. Il suffit ensuite de redémarrer. |
-| **Installation** | Depuis la clé, TitanOs se copie sur le disque interne ou sur une autre clé USB, avec vos fichiers. |
+| **Installation** | Comme pour Windows : la clé d'installation ouvre un assistant qui installe TitanOs sur le disque de l'ordinateur. La clé ne sert qu'à l'installation. |
 | **Intégration au portable** | Batterie, touches Fn (luminosité, volume), couvercle, bouton d'alimentation, mise en veille, températures, interrupteur Wi-Fi du VAIO. |
-| **Navigateur web** | Google Chrome (le paquet officiel de Google) s'installe tout seul dès la première connexion à Internet et s'ouvre dans une fenêtre TitanOs. Les téléchargements vont dans *Téléchargements* ; le son passe par PipeWire et le haut-parleur. |
+| **Navigateur web** | Google Chrome (le paquet officiel de Google), installé quand vous le décidez : `installer-chrome` dans le Terminal. Il s'ouvre dans une fenêtre TitanOs ; les téléchargements vont dans *Téléchargements* ; le son passe par PipeWire et le haut-parleur. |
 | **Logithèque** | LibreOffice, VS Code, Discord, GIMP, Python et Node.js s'installent en un clic, et la recherche trouve tout paquet Debian. Chaque application graphique a sa propre fenêtre et rejoint le menu Démarrer avec son icône. |
 | **Applications Linux** | `apt install htop` dans le Terminal installe un programme de Debian (sudo est demandé tout seul). Il reste installé dans l'espace des applications. |
 | **Sécurité** | Le Terminal tourne sous le compte `titan`, sans droits d'administrateur. `sudo` demande le mot de passe de session ; sans mot de passe défini, il refuse. |
@@ -81,6 +81,7 @@ Debian s'installe tout seul au premier démarrage, depuis la clé, avec une barr
 
 | | |
 |---|---|
+| **Clé d'installation** | La clé ne contient plus le système : elle installe TitanOs sur le disque de l'ordinateur, avec un assistant (disque, confirmation, progression). Rien ne se télécharge tout seul : les applications s'installent dans le Terminal. |
 | **Base Debian** | Debian 13 sous le bureau de TitanOs : apt, NetworkManager, PipeWire, systemd. Chrome, Discord et VS Code s'installent avec leur paquet officiel. Installée toute seule au premier démarrage. |
 | **Fenêtres** | Ancrage sur les moitiés de l'écran avec aperçu, vue d'ensemble animée de toutes les fenêtres. |
 | **Éclairage nocturne** | Couleurs plus chaudes le soir (Paramètres → Écran), appliquées par la carte graphique, sans coût pour le processeur. |
@@ -92,25 +93,31 @@ Tout le détail est dans l'[historique des versions](CHANGELOG.md).
 
 ## Installer
 
-1. Téléchargez `titanos-betaN.img.zip` dans la [dernière version](../../releases/latest), puis décompressez-le.
-2. Écrivez `titanos.img` sur une clé USB avec **Rufus, en mode DD**. Cela efface la clé : prenez-en une d'au moins 4 Go (8 Go ou plus pour installer des applications).
-3. Démarrez sur la clé :
+TitanOs s'installe comme Windows : une **clé d'installation** démarre un assistant qui installe le système sur le disque de l'ordinateur. Le système ne tourne pas depuis la clé.
+
+1. Téléchargez `titanos-installeur-betaN.img.zip` dans la [dernière version](../../releases/latest), puis décompressez-le.
+2. Écrivez `titanos.img` sur une clé USB d'au moins 1 Go avec **Rufus, en mode DD** (cela efface la clé).
+3. Démarrez l'ordinateur sur la clé :
    - **Sony VAIO (BIOS)** : touche F2, onglet *Boot*, activez *External Device Boot* et mettez la clé en premier ;
    - **PC récent (UEFI)** : désactivez *Secure Boot*.
-4. **Premier démarrage** : TitanOs installe sa base Debian sur la clé, avec une barre de progression (quelques minutes, une seule fois). Les démarrages suivants vont directement au bureau.
-5. Pour l'installer sur le disque, utilisez l'application **Mises à jour**, puis « Installer sur ce disque… ». **Le disque choisi est entièrement effacé.**
+4. L'assistant d'installation s'ouvre. Choisissez le disque (16 Go au moins), confirmez, puis attendez la fin de la copie. **Le disque choisi est entièrement effacé**, Windows compris.
+5. Retirez la clé et redémarrez. Au premier démarrage, TitanOs installe sa base Debian, avec une barre de progression : quelques minutes, une seule fois.
+
+Le disque est partagé en deux :
+- **TitanOs et vos fichiers** (FAT32) : la plus grande partie ;
+- **l'espace des applications** (Debian, ext4) : un tiers du disque, entre 8 et 64 Go.
 
 Il faut 1 Go de mémoire au minimum. Une fois TitanOs installé, les nouvelles versions arrivent toutes seules.
 
-**Depuis une bêta 32 ou plus ancienne** : la mise à jour automatique installe la bêta 33, puis télécharge la base Debian (environ 300 Mo) dans l'espace des applications. Redémarrez : Debian s'installe, et vos réseaux Wi-Fi enregistrés et votre profil Google Chrome sont repris.
+**Applications** : rien ne s'installe tout seul. Dans le Terminal, `apt install nom` installe un programme de Debian. Pour les applications de leurs éditeurs, tapez `installer-chrome`, `installer-discord` ou `installer-vscode`. La Logithèque reste disponible pour le faire à la souris.
 
-**Mettre à jour sans Internet** : démarrez sur une clé TitanOs plus récente, puis ouvrez Mises à jour et choisissez « Mettre à jour le disque » (vos fichiers sont gardés). Autre solution : copiez `titanos-maj.tar.gz` (dans chaque version publiée) sur une clé USB, branchez-la, puis cliquez sur « Installer ce paquet ».
+**Mettre à jour sans Internet** : démarrez sur une clé d'installation plus récente, puis choisissez « Mettre à jour le TitanOs déjà installé » (vos fichiers sont gardés). Autre solution : copiez `titanos-maj.tar.gz` (dans chaque version publiée) sur une clé USB, branchez-la, puis cliquez sur « Installer ce paquet » dans Mises à jour.
 
 ## Applications
 
 | Application | Rôle |
 |---|---|
-| **Google Chrome** | Le navigateur de Google, paquet officiel (mis à jour avec Debian) : onglets, compte Google, favoris, téléchargements, vidéos avec le son. Il tourne sous le compte `titan`, avec son bac à sable et la disposition de clavier de TitanOs. |
+| **Google Chrome** | Le navigateur de Google, paquet officiel (mis à jour avec Debian), installé par `installer-chrome` dans le Terminal ou par le bouton de sa fenêtre : onglets, compte Google, favoris, téléchargements, vidéos avec le son. Il tourne sous le compte `titan`, avec son bac à sable et la disposition de clavier de TitanOs. |
 | **Logithèque** | Installe et désinstalle LibreOffice, GIMP, Python 3 et Node.js (Debian), VS Code et Discord (paquets officiels). La recherche trouve tout paquet Debian. Les installations se font une à la fois, avec une barre de progression. |
 | **Fichiers** | Dossiers et fichiers : créer, renommer (F2), dupliquer, supprimer avec confirmation. Chaque fichier s'ouvre avec la bonne application : textes dans le Bloc-notes, images dans la visionneuse, PDF, vidéos, musique et pages web dans Google Chrome. Les archives (zip, tar.gz, tar.xz…) s'extraient d'un double-clic. Les clés USB branchées apparaissent, avec un bouton *Éjecter*. |
 | **Terminal** | Vrai terminal (VT100/xterm, 256 couleurs) avec bash, sous le compte `titan`. `sudo` pour l'administration (mot de passe de session). Les commandes de Debian : apt, nmcli, journalctl, systemctl, lsblk, lspci, lsusb, nano, less, htop, tree, zip, iw… `aide` les présente. |
@@ -120,7 +127,7 @@ Il faut 1 Go de mémoire au minimum. Une fois TitanOs installé, les nouvelles v
 | **Paramètres** | Personnalisation, écran, son, clavier et souris, réseau, date et heure, compte (mot de passe de session), système. |
 | **Système** | Machine, températures, batterie, matériel PCI/USB avec son pilote, processus. |
 | **Réseau** | Wi-Fi WPA2, WPA3, WPA2-Entreprise (identifiant et mot de passe), réseaux ouverts et masqués, mot de passe affichable, réseaux enregistrés ; câble, partage USB d'un téléphone. Le test de connexion vérifie chaque étape (adresse, box, Internet, DNS) et dit laquelle bloque. Le Wi-Fi passe par NetworkManager. La **console réseau** montre en direct ce que font la carte et NetworkManager, erreurs expliquées en français, et s'enregistre dans un fichier. |
-| **Mises à jour** | Version installée, recherche sur GitHub ; « Rechercher » met aussi à jour les programmes Debian. Installation sur un disque ou une clé USB. |
+| **Mises à jour** | Version installée, recherche sur GitHub ; « Rechercher » met aussi à jour les programmes Debian. |
 | **Snake**, **À propos** | |
 
 **Raccourcis**
@@ -168,6 +175,7 @@ Branchez la clé sur un autre ordinateur pour lire ces fichiers.
 
 - Les applications graphiques Linux (Google Chrome, LibreOffice, VS Code, Discord, GIMP) tournent chacune dans un serveur X en mémoire (Xvfb), dessiné par le processeur : la navigation est fluide, les vidéos lourdes le sont moins.
 - Le câble Ethernet du VAIO (Marvell Yukon, pilote `sky2`) ne détecte toujours pas le branchement.
+- Vos fichiers sont sur une partition FAT32 : un fichier ne peut pas dépasser 4 Go.
 - Le dessin se fait au processeur : la carte graphique sert à l'affichage et à la synchronisation, pas à la 3D.
 - Les mises à jour sont vérifiées par HTTPS et SHA-256, pas encore par une signature.
 
@@ -190,7 +198,7 @@ Au premier lancement, le build télécharge environ 400 Mo et les garde dans `bu
 
 | Résultat | Rôle |
 |---|---|
-| `build/titanos.img` | Image d'environ 700 Mo pour clé USB (BIOS et UEFI), base Debian comprise |
+| `build/titanos.img` | Clé d'installation d'environ 700 Mo (BIOS et UEFI), base Debian comprise |
 | `build/titanos.vhd` | La même image, en disque virtuel |
 | `build/titanos-maj.tar.gz` et `build/VERSION` | Paquet de mise à jour, à publier avec chaque version |
 | `build/gen/DEBIAN.TXZ` et `build/gen/DEBS.TAR` | La base Debian (système de départ, puis paquets), aussi publiée pour les mises à jour |
@@ -261,7 +269,8 @@ TitanOs suit un **numéro de version sémantique** `majeur.mineur.correctif`, co
 
 | Version | Tag Git | Nom affiché | Statut |
 |---|---|---|---|
-| **0.33.0** | `v0.33.0-beta.33` | TitanOs Bêta 33 | dernière version : base Debian |
+| **0.34.0** | `v0.34.0-beta.34` | TitanOs Bêta 34 | dernière version : clé d'installation |
+| 0.33.0 | `v0.33.0-beta.33` | TitanOs Bêta 33 | base Debian |
 | 0.32.0 | `v0.32.0-beta.32` | TitanOs Bêta 32 | |
 
 - **majeur** (`0`) : reste à 0 tant que TitanOs est en bêta. La version 1.0.0 sera la première version stable.
@@ -269,7 +278,7 @@ TitanOs suit un **numéro de version sémantique** `majeur.mineur.correctif`, co
 - **correctif** : pour une correction publiée sans nouvelle fonction (`0.32.1`...).
 
 Chaque version publiée contient :
-- `titanos-beta33.img.zip`, l'image à écrire sur une clé (Rufus, balenaEtcher, `dd`) ;
+- `titanos-installeur-beta34.img.zip`, la clé d'installation à écrire avec Rufus, balenaEtcher ou `dd` ;
 - `titanos-maj.tar.gz`, la mise à jour par Internet ou par clé USB ;
 - `VERSION`, le numéro de bêta, lu par la recherche automatique des mises à jour ;
 - `DEBIAN.TXZ` et `DEBS.TAR`, la base Debian, téléchargée par les TitanOs installés avant la bêta 33.

@@ -2,6 +2,35 @@
 
 Toutes les versions sont dans les [versions publiées](../../releases). Depuis la bêta 6, TitanOs se met à jour tout seul.
 
+## Bêta 34 (0.34.0)
+
+**Clé d'installation, comme Windows**
+
+La clé ne contient plus le système : elle installe TitanOs sur le disque de l'ordinateur.
+
+- Démarrée sur la clé, TitanOs ouvre un **assistant d'installation** plein écran, à la place du bureau. Les étapes :
+  1. bienvenue ;
+  2. choix du disque (modèle, taille, interne ou USB) ;
+  3. confirmation en rouge (« tout sera effacé, Windows compris ») ;
+  4. copie, avec une barre de progression ;
+  5. « Retirez la clé et redémarrez ».
+- **Le disque est entièrement repartitionné** :
+  - une grande partition pour TitanOs et vos fichiers (FAT32, formatée à la taille du disque) ;
+  - l'espace des applications (un tiers du disque, entre 8 et 64 Go), créé au premier démarrage. Debian s'y installe, avec sa barre de progression.
+- Si TitanOs est déjà installé sur un disque, l'assistant propose aussi **« Mettre à jour le TitanOs déjà installé »**, sans toucher aux fichiers. La base Debian est copiée en même temps si elle manque.
+- La clé d'installation n'écrit rien sur elle-même : ni dossier Utilisateur, ni espace des applications.
+
+**Applications : rien ne s'installe tout seul**
+- Google Chrome ne se télécharge plus tout seul à la première connexion.
+- Dans le Terminal, trois commandes téléchargent le paquet officiel de chaque éditeur puis l'installent avec apt (sudo est demandé) :
+  - `installer-chrome` ;
+  - `installer-discord` ;
+  - `installer-vscode`.
+- `apt install nom` installe tout programme de Debian. La Logithèque reste là pour le faire à la souris.
+
+**Mises à jour plus sûres**
+- Le chargeur de démarrage reçoit maintenant l'emplacement réel du noyau sur le disque (demandé au noyau Linux). Les mises à jour marchent donc sur tous les disques, quelle que soit leur disposition. Avant, une image de taille différente bloquait la mise à jour.
+
 ## Bêta 33 (0.33.0)
 
 **Nouvelle base : Debian 13**

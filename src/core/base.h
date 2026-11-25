@@ -25,8 +25,8 @@ typedef __builtin_va_list va_list;
 #define false 0
 #define NULL  ((void *)0)
 
-#define TITANOS_VERSION "Bêta 33"
-#define TITANOS_BUILD   33             /* numéro de version, comparé aux mises à jour publiées */
+#define TITANOS_VERSION "Bêta 34"
+#define TITANOS_BUILD   34             /* numéro de version, comparé aux mises à jour publiées */
 #define countof(a) ((int)(sizeof(a) / sizeof((a)[0])))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -231,6 +231,7 @@ void core_init(int w, int h);
 void core_resize(int w, int h);
 void core_splash(const char *step, int percent);           /* texte de l'écran de démarrage */
 void core_start(void);
+void core_start_setup(void);                                /* clé d'installation : l'assistant */
 void core_event(const event_t *e);
 bool core_raw_key(int code, bool down, int mods);   /* touche brute : true si une fenêtre la prend */
 bool core_raw_key_wanted(void);                     /* la fenêtre active veut-elle les touches brutes ? */

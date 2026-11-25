@@ -5,13 +5,13 @@
  * marquée « dernière » (lien direct releases/latest/download/VERSION) : contrairement à
  * l'API de GitHub (60 demandes par heure sans compte), ce lien n'est pas limité. Si elle est plus récente, son paquet titanos-maj.tar.gz est
  * téléchargé (curl, en HTTPS, certificats vérifiés), ses sommes SHA-256 sont vérifiées, puis les
- * fichiers du système sont réécrits sur place : ils ont une taille fixe et donc toujours
- * les mêmes secteurs (voir tools/mkimage.py), ce qui permet au chargeur BIOS de les
- * retrouver. Le chargeur lui-même (MBR et 2e étape) est réécrit en dernier.
+ * fichiers du système sont réécrits sur place : ils ont une taille fixe et gardent donc leurs
+ * secteurs (voir tools/mkimage.py). Le chargeur BIOS (MBR et 2e étape) est réécrit en dernier,
+ * avec l'emplacement de ces fichiers sur ce disque-là (demandé au noyau : FIBMAP).
  *
- * Installation : la partie TitanOs de la clé (MBR, chargeur, partition FAT32) est copiée
- * au début du disque choisi, qui reçoit sa propre signature. L'espace des applications
- * y sera créé au premier démarrage, dans tout le reste du disque.
+ * Installation (clé d'installation) : le disque choisi est entièrement repartitionné. Une
+ * partition FAT32 (système et fichiers de l'utilisateur) prend la plus grande part ; le reste
+ * devient l'espace des applications au premier démarrage, où Debian s'installe.
  *
  * Tout se fait dans un processus à part, qui envoie son état au bureau par un tube. */
 #include "linux.h"
@@ -187,13 +187,6 @@ static bool disk_mounted(const char *disk) {
 /* Mise à jour                                                          */
 /* ================================================================== */
 /* en-tête du chargeur BIOS (secteur 1) : emplacement des fichiers */
-static bool s2_layout(const uint8_t *s, long n, uint32_t out[3]) {
-    if (n < 40 || memcmp(s + 4, "TITN", 4)) return false;
-    memcpy(&out[0], s + 8, 4);            /* noyau */
-    memcpy(&out[1], s + 16, 4);           /* initramfs */
-    memcpy(&out[2], s + 28, 4);           /* images de démarrage */
-    return true;
-}
 
 /* pourquoi GitHub ne répond pas : adresse, passerelle, DNS ou HTTPS ? */
 static void net_diagnose(char *out, int n) {
@@ -223,21 +216,93 @@ static void net_diagnose(char *out, int n) {
  * src[i] : contenu de chaque fichier du système (complété de zéros jusqu'à sa taille
  * réservée), puis le MBR (440 octets de code) et le chargeur BIOS (stage2). Les fichiers de
  * l'utilisateur ne sont pas touchés. */
+/* ---------------- emplacement des fichiers du système sur le disque ---------------- */
+/* Le chargeur BIOS lit le noyau, l'initramfs et l'image de démarrage par numéros de secteur :
+ * chacun doit être d'un seul tenant. Le noyau donne l'emplacement de chaque bloc (FIBMAP). */
+static bool file_lba(const char *path, uint64_t part_start, uint32_t *lba) {
+    int fd = sys_open(path, O_RDONLY | O_CLOEXEC, 0);
+    if (fd < 0) return false;
+    long size = file_size(path);
+    int bsz = 0, first = 0;
+    bool ok = size > 0 && sys_ioctl(fd, 2 /* FIGETBSZ */, &bsz) == 0 && bsz >= 512 && bsz % 512 == 0 &&
+              sys_ioctl(fd, 1 /* FIBMAP */, &first) == 0 && first > 0;
+    long nblk = ok ? (size + bsz - 1) / bsz : 0, step = ok ? MAX(1, 262144 / bsz) : 1;
+    for (long k = step; ok; k += step) {                    /* d'un seul tenant : vérifié tous les 256 Ko */
+        int b = (int)MIN(k, nblk - 1), phys = b;
+        ok = sys_ioctl(fd, 1, &phys) == 0 && phys == first + b;
+        if (b == nblk - 1) break;
+    }
+    sys_close(fd);
+    if (ok) *lba = (uint32_t)(part_start + (uint64_t)first * (uint64_t)(bsz / 512));
+    return ok;
+}
+
+/* partition montée sur root (sda1...) */
+static bool mount_part(const char *root, char *part, int n) {
+    static char m[32768];
+    if (read_file("/proc/mounts", m, sizeof m) <= 0) return false;
+    char key[96];
+    snprintf(key, sizeof key, " %s ", root);
+    char *p = strstr(m, key);
+    if (!p) return false;
+    char *s = p;
+    while (s > m && s[-1] != '\n') s--;
+    int len = (int)(p - s) - 5;
+    if (strncmp(s, "/dev/", 5) || len <= 0 || len >= n) return false;
+    memcpy(part, s + 5, (size_t)len);
+    part[len] = 0;
+    return true;
+}
+
+static void put32(uint8_t *p, uint32_t v) { memcpy(p, &v, 4); }
+
+/* inscrit dans la 2e étape du chargeur l'emplacement du noyau, de l'initramfs et de l'image de
+ * démarrage qui sont sous root (kernel : le noyau qui y sera, pour la taille de son en-tête) */
+static bool place_stage2(uint8_t *s2, long s2n, const char *root, const char *kernel) {
+    char part[48], p[160], v[32];
+    if (s2n < 64 || memcmp(s2 + 4, "TITN", 4) || !mount_part(root, part, sizeof part)) return false;
+    snprintf(p, sizeof p, "/sys/class/block/%s/start", part);
+    uint64_t start = read_file(p, v, sizeof v) > 0 ? (uint64_t)strtol(v, NULL, 10) : 0;
+    if (!start) return false;
+    uint32_t k, in, b;
+    snprintf(p, sizeof p, "%s/TITANOS/VMLINUZ", root);
+    if (!file_lba(p, start, &k)) { klog("chargeur : noyau introuvable ou en plusieurs morceaux"); return false; }
+    snprintf(p, sizeof p, "%s/TITANOS/INITRD.IMG", root);
+    if (!file_lba(p, start, &in)) { klog("chargeur : initramfs introuvable ou en plusieurs morceaux"); return false; }
+    snprintf(p, sizeof p, "%s/TITANOS/BOOT.IMG", root);
+    if (!file_lba(p, start, &b)) { klog("chargeur : image de démarrage introuvable ou en plusieurs morceaux"); return false; }
+    uint8_t kh[0x200];
+    int fd = sys_open(kernel, O_RDONLY | O_CLOEXEC, 0);
+    bool ok = fd >= 0 && sys_read(fd, kh, sizeof kh) == (long)sizeof kh;
+    if (fd >= 0) sys_close(fd);
+    if (!ok) return false;
+    int setup = kh[0x1F1] ? kh[0x1F1] : 4;
+    put32(s2 + 8, k + (uint32_t)setup + 1);              /* partie « protégée » du noyau */
+    put32(s2 + 16, in);
+    put32(s2 + 28, b);
+    klog("chargeur : noyau au secteur %u, initramfs %u, image %u", k, in, b);
+    return true;
+}
+
 static bool apply_system(const char *root, const char *dev, char *const src[NSYS], const uint8_t *mbr,
-                         const uint8_t *s2, long s2n, int build) {
-    uint8_t cur[512];
+                         const uint8_t *s2_in, long s2n, int build) {
     int dfd = sys_open(dev, O_RDWR | O_CLOEXEC, 0);
-    uint32_t a[3], b[3];
-    bool same = s2 && dfd >= 0 && sys_lseek(dfd, 512, 0) == 512 && sys_read(dfd, cur, 512) == 512 &&
-                s2_layout(cur, 512, a) && s2_layout(s2, s2n, b) && !memcmp(a, b, sizeof a);
+    bool same = s2_in && dfd >= 0 && s2n <= 63 * 512;
     char path[160];
     for (int i = 0; same && i < NSYS; i++) {
         snprintf(path, sizeof path, "%s/%s", root, SYSFILES[i].path);
         if (file_size(path) != SYSFILES[i].size) same = false;
     }
-    if (!same || s2n > 63 * 512) {
+    /* le chargeur reçoit l'emplacement des fichiers sur ce disque (ils sont réécrits sur place :
+     * il ne change pas) ; vérifié avant de toucher à quoi que ce soit */
+    static uint8_t s2[63 * 512];
+    if (same) {
+        memcpy(s2, s2_in, (size_t)s2n);
+        same = place_stage2(s2, s2n, root, src[0]);
+    }
+    if (!same) {
         if (dfd >= 0) sys_close(dfd);
-        say(UPD_ERROR, -1, "Ce TitanOs est trop ancien pour se mettre à jour ainsi : réinstallez-le (Rufus ou « Installer sur ce disque »).");
+        say(UPD_ERROR, -1, "Ce TitanOs est trop ancien pour se mettre à jour ainsi : réinstallez-le avec la clé d'installation.");
         return false;
     }
     say(UPD_INSTALLING, 0, "Installation de la bêta %d… ne pas éteindre", build);
@@ -560,6 +625,8 @@ bool plat_other_titanos(char *desc, int n) {
     return true;
 }
 
+static bool copy_into(const char *from, const char *to, uint64_t *done, uint64_t total);
+
 static void other_main(void *arg) {
     (void)arg;
     char boot[32], disk[32], dev[48], bdev[48], part[48];
@@ -581,6 +648,18 @@ static void other_main(void *arg) {
     for (int i = 0; i < NSYS; i++) { snprintf(names[i], sizeof names[i], "/media/titanos/%s", SYSFILES[i].path); src[i] = names[i]; }
     if (ok) ok = apply_system("/run/cible", dev, src, mbr, s2, sizeof s2, TITANOS_BUILD);
     else say(UPD_ERROR, -1, "Lecture de la clé impossible.");
+    /* la base Debian, pour un TitanOs qui ne l'a pas encore (installée à son prochain démarrage) */
+    static const char *const deb[] = { "TITANOS/DEBIAN.TXZ", "TITANOS/DEBS.TAR" };
+    struct { long type, bsize; unsigned long blocks, bfree, bavail, files, ffree; int fsid[2]; long namelen, frsize, flags, spare[4]; } fs;
+    uint64_t need = 0, done = 0;
+    for (int i = 0; i < 2; i++) { char q[96]; snprintf(q, sizeof q, "/media/titanos/%s", deb[i]); long n = file_size(q); need += n > 0 ? (uint64_t)n : 0; }
+    if (ok && need && sc2(__NR_statfs, (long)"/run/cible", (long)&fs) == 0 && fs.bavail * (unsigned long)fs.bsize > need + (64ull << 20))
+        for (int i = 0; i < 2; i++) {
+            char a[96], b[96];
+            snprintf(a, sizeof a, "/media/titanos/%s", deb[i]);
+            snprintf(b, sizeof b, "/run/cible/%s", deb[i]);
+            if (file_size(b) != file_size(a)) copy_into(a, b, &done, need);
+        }
     sys_sync();
     sys_umount2("/run/cible", 0);
     if (!ok) return;
@@ -661,60 +740,145 @@ bool plat_install_possible(void) {
 
 static char install_target[32];
 
+static void part_of(const char *disk, int num, char *out, int n) {
+    int l = (int)strlen(disk);
+    bool digit = l && disk[l - 1] >= '0' && disk[l - 1] <= '9';      /* nvme0n1p1, mmcblk0p1 */
+    snprintf(out, (size_t)n, "%s%s%d", disk, digit ? "p" : "", num);
+}
+
+/* copie d'un fichier de la clé vers le disque ; done/total : avancement global */
+static bool copy_into(const char *from, const char *to, uint64_t *done, uint64_t total) {
+    int in = sys_open(from, O_RDONLY | O_CLOEXEC, 0);
+    if (in < 0) return false;
+    char dir[200];
+    strlcpy(dir, to, sizeof dir);
+    char *sl = strrchr(dir, '/');
+    if (sl) { *sl = 0; mkdirs(dir); }
+    int out = sys_open(to, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    static uint8_t buf[1 << 20];
+    bool ok = out >= 0;
+    while (ok) {
+        long r = sys_read(in, buf, sizeof buf);
+        if (r < 0) ok = false;
+        if (r <= 0) break;
+        ok = write_all(out, buf, r);
+        *done += (uint64_t)r;
+        say(UPD_INSTALLING, 12 + (int)(*done * 84 / (total + 1)), "Copie de TitanOs sur le disque… %d / %d Mo", (int)(*done >> 20), (int)(total >> 20));
+    }
+    if (out >= 0) { sc1(__NR_fsync, out); sys_close(out); }
+    sys_close(in);
+    return ok;
+}
+
+/* Installation sur un disque, depuis la clé d'installation : le disque est entièrement
+ * repartitionné. Partition 1 (FAT32, « TITANOS ») : le système et les fichiers de
+ * l'utilisateur ; le reste (un tiers du disque, entre 8 et 64 Go) devient l'espace des
+ * applications au premier démarrage, et Debian s'y installe (archives copiées ici). */
 static void install_main(void *arg) {
     (void)arg;
-    char boot[32], src[48], dst[48];
+    char boot[32], src[48], dst[48], part[32], pdev[48], p[96], v[32];
     if (!boot_disk(boot, sizeof boot)) { say(UPD_ERROR, -1, "Clé TitanOs introuvable."); return; }
     if (!strcmp(boot, install_target) || disk_mounted(install_target)) { say(UPD_ERROR, -1, "Ce disque est utilisé : impossible d'y installer TitanOs."); return; }
     snprintf(src, sizeof src, "/dev/%s", boot);
     snprintf(dst, sizeof dst, "/dev/%s", install_target);
-    say(UPD_INSTALLING, 0, "Préparation…");
+    snprintf(p, sizeof p, "/sys/block/%s/size", install_target);
+    uint64_t sectors = read_file(p, v, sizeof v) > 0 ? (uint64_t)strtol(v, NULL, 10) : 0;
+    if (sectors < (16ull << 30) / 512) { say(UPD_ERROR, -1, "Il faut un disque d'au moins 16 Go."); return; }
+    /* partage : les applications (Debian) un tiers, entre 8 et 64 Go ; vos fichiers le reste */
+    uint64_t apps = sectors / 3;
+    apps = MAX(apps, (8ull << 30) / 512);
+    apps = MIN(apps, (64ull << 30) / 512);
+    uint64_t p1 = (sectors - 2048 - apps) & ~2047ull;
+    if (p1 > 0xFFFFF000ull) p1 = 0xFFFFF000ull & ~2047ull;      /* limite des tables MBR (2 To) */
+
+    say(UPD_INSTALLING, 1, "Préparation du disque…");
     sys_sync();
-    int in = sys_open(src, O_RDONLY | O_CLOEXEC, 0), out = sys_open(dst, O_RDWR | O_CLOEXEC, 0);
+    uint8_t kmbr[512];
+    static uint8_t s2[63 * 512];
+    int in = sys_open(src, O_RDONLY | O_CLOEXEC, 0);
+    bool ok = in >= 0 && sys_read(in, kmbr, 512) == 512 && kmbr[510] == 0x55 && sys_read(in, s2, sizeof s2) == (long)sizeof s2 &&
+              !memcmp(s2 + 4, "TITN", 4);
+    if (in >= 0) sys_close(in);
+    if (!ok) { say(UPD_ERROR, -1, "Lecture du chargeur de la clé impossible."); return; }
+    int out = sys_open(dst, O_RDWR | O_CLOEXEC, 0);
+    if (out < 0) { say(UPD_ERROR, -1, "Ouverture du disque impossible."); return; }
+    /* anciennes tables de partitions effacées (MBR et GPT, au début et à la fin du disque) */
+    static uint8_t zero[1 << 20];
+    ok = sys_lseek(out, 0, 0) == 0 && write_all(out, zero, sizeof zero) &&
+         sys_lseek(out, (long)(sectors * 512 - sizeof zero), 0) >= 0 && write_all(out, zero, sizeof zero);
     uint8_t mbr[512];
-    if (in < 0 || out < 0 || sys_read(in, mbr, 512) != 512 || mbr[510] != 0x55 || mbr[511] != 0xAA) {
-        if (in >= 0) sys_close(in);
-        if (out >= 0) sys_close(out);
-        say(UPD_ERROR, -1, "Lecture de la clé ou ouverture du disque impossible.");
-        return;
-    }
-    uint32_t s1, n1;
-    memcpy(&s1, mbr + 446 + 8, 4);
-    memcpy(&n1, mbr + 446 + 12, 4);
-    uint64_t total = ((uint64_t)s1 + n1) * 512;
-    static uint8_t buf[1 << 20];
-    uint64_t done = 0;
-    sys_lseek(in, 0, 0);
-    klog("installation : copie de %s vers %s (%d Mo)", src, dst, (int)(total >> 20));
-    while (done < total) {
-        long want = (long)MIN((uint64_t)sizeof buf, total - done);
-        long r = sys_read(in, buf, (size_t)want);
-        if (r <= 0 || !write_all(out, buf, r)) {
-            sys_close(in);
-            sys_close(out);
-            say(UPD_ERROR, -1, "Erreur pendant la copie : le disque n'est pas utilisable en l'état.");
-            return;
-        }
-        done += (uint64_t)r;
-        say(UPD_INSTALLING, (int)(done * 95 / total), "Copie de TitanOs sur le disque… %d / %d Mo", (int)(done >> 20), (int)(total >> 20));
-    }
-    /* table de partitions du disque : seulement la partition TitanOs, et sa propre signature */
-    uint8_t m2[512];
-    memcpy(m2, mbr, 512);
-    memset(m2 + 446 + 16, 0, 48);                       /* pas l'espace des applications de la clé */
+    memset(mbr, 0, sizeof mbr);
+    memcpy(mbr, kmbr, 440);
     uint32_t sig = 0;
     sc3(__NR_getrandom, (long)&sig, 4, 0);
     if (!sig) sig = (uint32_t)plat_ms() * 2654435761u;
-    memcpy(m2 + 440, &sig, 4);
-    bool ok = sys_lseek(out, 0, 0) == 0 && write_all(out, m2, 512);
+    memcpy(mbr + 440, &sig, 4);
+    uint8_t *e = mbr + 446;
+    e[0] = 0x80;                                                      /* partition de démarrage */
+    e[1] = 0xFE; e[2] = 0xFF; e[3] = 0xFF; e[5] = 0xFE; e[6] = 0xFF; e[7] = 0xFF;
+    e[4] = 0x0C;                                                      /* FAT32 (LBA) */
+    put32(e + 8, 2048);
+    put32(e + 12, (uint32_t)p1);
+    mbr[510] = 0x55;
+    mbr[511] = 0xAA;
+    ok = ok && sys_lseek(out, 0, 0) == 0 && write_all(out, mbr, 512);
     sc1(__NR_fsync, out);
     sys_ioctl(out, 0x125F /* BLKRRPART */, NULL);
-    sys_close(in);
     sys_close(out);
+    if (!ok) { say(UPD_ERROR, -1, "Écriture sur le disque impossible."); return; }
+    part_of(install_target, 1, part, sizeof part);
+    snprintf(pdev, sizeof pdev, "/dev/%s", part);
+    for (int i = 0; i < 50 && !path_exists(pdev); i++) sleep_ms(100);
+    klog("installation : %s, %d Go pour TitanOs et vos fichiers, %d Go pour les applications",
+         dst, (int)(p1 >> 21), (int)((sectors - 2048 - p1) >> 21));
+
+    say(UPD_INSTALLING, 4, "Formatage du disque…");
+    char *mkfs[] = { "/bin/busybox", "mkfs.vfat", "-n", "TITANOS", pdev, NULL };
+    char *mkfs_deb[] = { "/usr/sbin/mkfs.fat", "-F", "32", "-n", "TITANOS", pdev, NULL };      /* dans Debian (dosfstools) */
+    if (!path_exists(pdev) || run(path_exists("/usr/sbin/mkfs.fat") ? mkfs_deb : mkfs) != 0) { say(UPD_ERROR, -1, "Le formatage du disque a échoué."); return; }
+    mkdirs("/run/cible");
+    if (sys_mount(pdev, "/run/cible", "vfat", 1024 /* MS_NOATIME */, "iocharset=utf8,shortname=mixed") != 0) {
+        say(UPD_ERROR, -1, "Le disque formaté ne s'ouvre pas.");
+        return;
+    }
+    /* copie : d'abord les fichiers du système, dans l'ordre, sur le disque encore vide (chacun
+     * d'un seul tenant), puis la base Debian */
+    static const char *const extra[] = { "TITANOS/VERSION", "LISEZMOI.TXT", "TITANOS/DEBIAN.TXZ", "TITANOS/DEBS.TAR" };
+    const char *files[NSYS + 4];
+    int nf = 0;
+    for (int i = 0; i < NSYS; i++) files[nf++] = SYSFILES[i].path;
+    for (int i = 0; i < 4; i++) files[nf++] = extra[i];
+    uint64_t total = 0, done = 0;
+    for (int i = 0; i < nf; i++) {
+        snprintf(p, sizeof p, "/media/titanos/%s", files[i]);
+        long n = file_size(p);
+        if (n > 0) total += (uint64_t)n;
+    }
+    for (int i = 0; ok && i < nf; i++) {
+        char from[160], to[160];
+        snprintf(from, sizeof from, "/media/titanos/%s", files[i]);
+        snprintf(to, sizeof to, "/run/cible/%s", files[i]);
+        if (!path_exists(from)) { ok = i >= NSYS; continue; }         /* les fichiers du système sont obligatoires */
+        ok = copy_into(from, to, &done, total);
+        if (!ok) klog("installation : copie de %s échouée", files[i]);
+    }
     sys_sync();
-    if (!ok) { say(UPD_ERROR, -1, "Écriture de la table de partitions impossible."); return; }
+    /* le chargeur de démarrage, avec l'emplacement des fichiers sur ce disque */
+    if (ok) {
+        say(UPD_INSTALLING, 97, "Installation du chargeur de démarrage…");
+        ok = place_stage2(s2, sizeof s2, "/run/cible", "/run/cible/TITANOS/VMLINUZ");
+        if (!ok) klog("installation : fichiers du système éparpillés sur le disque");
+    }
+    sys_umount2("/run/cible", 0);
+    sys_sync();
+    if (ok) {
+        out = sys_open(dst, O_RDWR | O_CLOEXEC, 0);
+        ok = out >= 0 && sys_lseek(out, 512, 0) == 512 && write_all(out, s2, sizeof s2);
+        if (out >= 0) { sc1(__NR_fsync, out); sys_close(out); }
+    }
+    if (!ok) { say(UPD_ERROR, -1, "L'installation n'a pas abouti : le disque n'est pas utilisable en l'état. Réessayez."); return; }
     klog("installation terminée sur %s", dst);
-    say(UPD_DONE, 100, "TitanOs est installé. Pour démarrer dessus, choisissez ce disque au démarrage de l'ordinateur.");
+    say(UPD_DONE, 100, "TitanOs est installé. Retirez la clé, puis redémarrez : le premier démarrage installe Debian (quelques minutes).");
 }
 
 bool plat_install_start(const char *dev) {

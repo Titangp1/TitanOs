@@ -30,8 +30,10 @@ static void br_draw(window_t *w, canvas_t *c) {
         text_center(c, &font_small, R(0, c->h / 2 + 46, c->w, 20), "Vous pouvez continuer à utiliser TitanOs pendant ce temps.", C_MUTED);
     } else {
         text_center(c, &font_body, R(0, c->h / 2 - 12, c->w, 22),
-                    st == BR_ERROR ? msg : "Le navigateur de Google, installé depuis Flathub.", st == BR_ERROR ? 0xFFFCA5A5 : C_TEXT2);
-        text_center(c, &font_small, R(0, c->h / 2 + 12, c->w, 20), "Environ 1 Go à télécharger, installé une fois pour toutes.", C_MUTED);
+                    st == BR_ERROR ? msg : "Google Chrome n'est pas installé.", st == BR_ERROR ? 0xFFFCA5A5 : C_TEXT2);
+        text_center(c, &font_small, R(0, c->h / 2 + 12, c->w, 20),
+                    plat_debian() ? "Dans le Terminal : installer-chrome. Ou avec ce bouton (environ 120 Mo)." :
+                                    "Environ 1 Go à télécharger, installé une fois pour toutes.", C_MUTED);
         ui_button(c, install_btn(c), st == BR_ERROR ? "Réessayer" : "Installer Google Chrome", BTN_ACCENT, b->hover);
     }
 }
@@ -130,8 +132,8 @@ void app_browser_open(void) {
     w->on_close = br_close;
 }
 
-/* installation automatique : Google Chrome est installé dès que TitanOs a Internet (et
- * remplace l'ancien Chromium s'il était là) */
+/* (plus utilisée : Google Chrome ne s'installe que si on le demande, dans le Terminal avec
+ * installer-chrome ou avec le bouton de sa fenêtre) */
 void browser_autoinstall(bool online) {
     static bool tried;
     if (tried || !online) return;

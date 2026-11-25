@@ -130,7 +130,7 @@ void open_path(const char *path) {
     if (ext_in(path, ARCHIVE_EXT)) { extract(path); return; }
     if (ext_in(path, WEB_EXT)) {
         if (plat_browser_state(NULL, 0, NULL) != BR_READY) {
-            dlg_message("Fichiers", "Ce fichier s'ouvre avec Google Chrome, qui n'est pas encore installé : il s'installe dès que TitanOs a Internet.");
+            dlg_message("Fichiers", "Ce fichier s'ouvre avec Google Chrome, qui n'est pas installé. Dans le Terminal, tapez : installer-chrome");
             return;
         }
         char url[700];

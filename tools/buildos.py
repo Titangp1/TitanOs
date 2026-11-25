@@ -373,7 +373,9 @@ def build(repo, B):
               f"DEBIAN.TXZ {info_d['txz'] >> 20} Mo, DEBS.TAR {info_d['debs'] >> 20} Mo")
     deb_txz = open(os.path.join(gen, "DEBIAN.TXZ"), "rb").read()
     deb_tar = open(os.path.join(gen, "DEBS.TAR"), "rb").read()
-    big = {"DEBIAN.TXZ": deb_txz, "DEBS.TAR": deb_tar}
+    # INSTALL : la clé ouvre l'assistant d'installation (fichier non copié sur le disque installé)
+    big = {"DEBIAN.TXZ": deb_txz, "DEBS.TAR": deb_tar,
+           "INSTALL": "Cle d'installation de TitanOs : elle installe TitanOs sur un disque de l'ordinateur.\n".encode()}
     disk_mb = max(DISK_MB, ((len(deb_txz) + len(deb_tar) >> 20) + 100 + 64 + 200 + 63) // 64 * 64)
 
     print("[image disque]")
@@ -394,6 +396,6 @@ def build(repo, B):
     write_update(out, info, s2, vmlinuz, initrd, bootimg.build(ttc))
     print(f"  noyau au secteur {info['kernel_lba']}, initramfs au secteur {info['initrd_lba']}, "
           f"chargé à {info['initrd_addr'] >> 20} Mo ; {info['free_mb']} Mo libres pour vos fichiers")
-    print(f"\nTitanOs bêta 33 est prêt :")
+    print(f"\nTitanOs bêta 34 est prêt :")
     print(f"  build/titanos.img   image pour clé USB ({disk_mb} Mo, démarre en BIOS et en UEFI)")
     print(f"  build/titanos.vhd   disque virtuel (VirtualBox, Hyper-V génération 1)")

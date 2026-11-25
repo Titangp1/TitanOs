@@ -161,6 +161,14 @@ void ui_button(canvas_t *c, rect_t r, const char *label, int style, bool hover);
  * deux nouvelles et un reflet la parcourt ; percent < 0 : durée inconnue. Renvoie true tant
  * qu'elle est animée (la fenêtre doit alors être redessinée à chaque image). */
 typedef struct { float shown, phase; uint64_t t; bool started; } ui_progress_t;
+/* setup.c : assistant de la clé d'installation */
+rect_t setup_rect(int sw, int sh);
+void   setup_init(void);
+void   setup_draw(canvas_t *c, rect_t card);
+bool   setup_motion(int x, int y);
+bool   setup_click(int x, int y);
+bool   setup_key(const event_t *e);
+bool   setup_tick(void);
 bool ui_progress(canvas_t *c, rect_t r, ui_progress_t *p, int percent);
 void ui_icon_button(canvas_t *c, rect_t r, int icon, bool hover);
 void ui_toggle(canvas_t *c, rect_t r, bool on);

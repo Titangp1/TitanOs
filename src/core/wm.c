@@ -35,7 +35,7 @@ static window_t *focused, *capture;
 static int mx = 200, my = 200, cur_ox = -100, cur_oy = -100;
 static bool cursor_moved;
 static int mods;
-enum { MODE_SPLASH, MODE_LOCK, MODE_DESK };
+enum { MODE_SPLASH, MODE_LOCK, MODE_DESK, MODE_SETUP };     /* SETUP : assistant de la clé d'installation */
 static int mode = MODE_SPLASH;
 
 /* ombre douce gardée en image : elle ne dépend que de la taille et du style */
@@ -55,7 +55,7 @@ static void draw_shadow(canvas_t *dst, shadow_t *s, rect_t r, float radius, floa
 typedef struct { rect_t r; bool ok, shown, leaving; canvas_t cache; int level; uint64_t t0; shadow_t sh; } glass_el_t;
 static field_t lock_pw;                    /* mot de passe tapé à l'écran de verrouillage */
 static bool lock_bad;
-static glass_el_t g_power, g_dock, g_tray, g_menu, g_cal, g_pop, g_toast, g_osd, g_avatar, g_hint;
+static glass_el_t g_power, g_dock, g_tray, g_menu, g_cal, g_pop, g_toast, g_osd, g_avatar, g_hint, g_setup;
 
 /* transitions plein écran : l'ancienne image (snap) s'efface par-dessus la nouvelle */
 enum { TR_NONE, TR_FADE, TR_UNLOCK };
@@ -1398,6 +1398,15 @@ static void draw_osd(void) {
 }
 
 /* ---------------- écrans plein écran ---------------- */
+/* assistant d'installation (src/core/setup.c) : une grande carte en verre sur le fond d'écran */
+static void draw_setup(void) {
+    draw_wallpaper();
+    gfx_fill_grad(T, R(0, 0, scr_w, scr_h), 0x40000000, 0x90000000);
+    rect_t r = setup_rect(scr_w, scr_h);
+    draw_glass_ex(&g_setup, r, 28, 2, 40, 0x70000000);
+    setup_draw(T, r);
+}
+
 static void draw_lock(void) {
     draw_wallpaper();
     gfx_fill_grad(T, R(0, 0, scr_w, scr_h), 0x30000000, 0x80000000);
@@ -1544,6 +1553,7 @@ static void compose(void) {
     canvas_clip(&scene, D);
     if (mode == MODE_SPLASH) draw_splash();
     else if (mode == MODE_LOCK) draw_lock();
+    else if (mode == MODE_SETUP) draw_setup();
     else {
         draw_desktop();
         if (ov_visible()) draw_overview();
@@ -2028,6 +2038,10 @@ static void mouse_button(const event_t *e) {
         if (e->down && !trans && !g_set.pass[0]) unlock();
         return;
     }
+    if (mode == MODE_SETUP) {
+        if (e->down && e->button == BTN_LEFT && setup_click(mx, my)) damage(setup_rect(scr_w, scr_h), 0);
+        return;
+    }
     if (mode != MODE_DESK) return;
 
     if (!e->down) {
@@ -2275,6 +2289,7 @@ void core_event(const event_t *e) {
             return;
         }
         }
+        if (mode == MODE_SETUP) { if (setup_key(e)) damage(setup_rect(scr_w, scr_h), 0); return; }
         if (mode == MODE_LOCK) {
             if (trans) return;
             if (!g_set.pass[0]) { unlock(); return; }
@@ -2329,6 +2344,7 @@ void core_event(const event_t *e) {
             }
         }
         if (mode == MODE_DESK) motion();
+        if (mode == MODE_SETUP && setup_motion(mx, my)) damage(setup_rect(scr_w, scr_h), 0);
         cursor_update();
         return;
     }
@@ -2401,6 +2417,19 @@ void core_splash(const char *step, int percent) {
     if (first) damage_all();
     else damage(splash_text_rect(), 0);
     compose();
+}
+
+/* clé d'installation : l'assistant à la place de l'écran de verrouillage */
+void core_start_setup(void) {
+    now = plat_ms();
+    local_now(&now_dt);
+    snapshot();
+    setup_init();
+    mode = MODE_SETUP;
+    trans = TR_FADE;
+    trans_t0 = now;
+    damage_all();
+    sound_play(SFX_STARTUP);
 }
 
 void core_start(void) {
@@ -2488,8 +2517,7 @@ static void poll_hardware(void) {
     bat = b;
     wifi_state = ws;
     wifi_signal = sig;
-    time_sync(ws == WIFI_CONNECTED || wired);
-    browser_autoinstall(ws == WIFI_CONNECTED || wired);
+    time_sync(ws == WIFI_CONNECTED || wired);           /* (plus d'installation automatique de Chrome) */
     char bm[160];
     static int last_br = -1;
     int br = plat_browser_state(bm, sizeof bm, NULL);
@@ -2526,6 +2554,16 @@ int core_frame(void) {
         else { damage(tray_rect(), 100); if (cal_open) damage(cal_rect(), 101); }
     }
     if (mode == MODE_LOCK && dt.sec != now_dt.sec) damage(R(0, scr_h - 44, scr_w, 30), 0);   /* diagnostic */
+    if (mode == MODE_SETUP) {
+        now_dt = dt;
+        bool a = setup_tick();
+        if (a) damage(setup_rect(scr_w, scr_h), 0);
+        if (trans) damage_all();
+        cursor_update();
+        if (ndmg) compose();
+        else if (cursor_moved && !cur_hw) present_rect(R(0, 0, 0, 0));
+        return a || trans ? 16 : 120;
+    }
     now_dt = dt;
     poll_hardware();
     if (toast_until && now >= toast_until) { toast_until = 0; el_hide(&g_toast); }

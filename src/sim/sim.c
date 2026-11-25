@@ -58,7 +58,7 @@ int plat_listdir(const char *path, dirent_t **out) {
     return n;
 }
 int plat_readfile(const char *path, char **data, size_t *len) {
-    const char *t = "Bienvenue dans TitanOs (bêta 33) !\n\nCe Bloc-notes enregistre vos textes sur la clé USB.\n"
+    const char *t = "Bienvenue dans TitanOs (bêta 34) !\n\nCe Bloc-notes enregistre vos textes sur la clé USB.\n"
                     "Le système tourne sur le noyau Linux, mais tout ce que vous voyez est fait maison.\n";
     if (str_ends(path, ".cfg")) return -1;
     *len = strlen(t);
@@ -191,6 +191,7 @@ EXPORT void sim_init(int w, int h) {
 }
 EXPORT void sim_splash(const char *s, int p) { core_splash(s, p); }
 EXPORT void sim_start(void) { core_start(); }
+EXPORT void sim_setup(void) { core_start_setup(); }
 EXPORT void sim_time(uint64_t ms) { sim_now = ms; }
 EXPORT int  sim_frame(void) { return core_frame(); }
 EXPORT uint32_t *sim_pixels(void) { return screen; }
