@@ -10,7 +10,7 @@
 bool png_decode(const uint8_t *f, size_t n, canvas_t *out);
 
 #define FLATHUB "flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo && "
-#define FLATPAK_BASE "mkdir -p /var/tmp && apk add --no-progress xvfb setxkbmap flatpak && " FLATHUB
+#define FLATPAK_BASE "mkdir -p /var/tmp && apk add --no-progress xvfb setxkbmap flatpak dbus pulseaudio pulseaudio-alsa && " FLATHUB
 #define FLATPAK_UNINSTALL(id) "flatpak uninstall -y --noninteractive " id " && flatpak uninstall -y --noninteractive --unused"
 #define FP_ICONS(id) { "/var/lib/flatpak/exports/share/icons/hicolor/128x128/apps/" id ".png", \
                        "/var/lib/flatpak/exports/share/icons/hicolor/256x256/apps/" id ".png", \
@@ -44,14 +44,14 @@ static const sapp_t APPS[] = {
       FLATPAK_BASE "flatpak install -y --noninteractive --system flathub com.visualstudio.code",
       FLATPAK_UNINSTALL("com.visualstudio.code"),
       "/var/lib/flatpak/app/com.visualstudio.code/current",
-      "exec flatpak run com.visualstudio.code --no-sandbox --disable-gpu --user-data-dir=/root/.var/app/com.visualstudio.code/data/vscode",
+      "exec flatpak run --filesystem=/media com.visualstudio.code --no-sandbox --disable-gpu",
       NULL, FP_ICONS("com.visualstudio.code"), 0x38BDF8, 0x1D4ED8, "</>" },
     { "discord", "Discord", "Discussions, salons et appels avec vos amis. Depuis Flathub.",
       "≈ 700 Mo avec la base Flatpak",
       FLATPAK_BASE "flatpak install -y --noninteractive --system flathub com.discordapp.Discord",
       FLATPAK_UNINSTALL("com.discordapp.Discord"),
       "/var/lib/flatpak/app/com.discordapp.Discord/current",
-      "exec flatpak run com.discordapp.Discord --no-sandbox --disable-gpu",
+      "exec flatpak run --filesystem=/media com.discordapp.Discord --no-sandbox --disable-gpu",
       NULL, FP_ICONS("com.discordapp.Discord"), 0x818CF8, 0x4338CA, "D" },
     { "python", "Python 3", "Le langage de programmation, avec pip pour ajouter des modules. S'ouvre dans le Terminal.",
       "≈ 60 Mo",

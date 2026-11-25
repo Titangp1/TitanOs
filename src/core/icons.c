@@ -118,7 +118,8 @@ void draw_icon(canvas_t *c, int icon, float x, float y, float s) {
         squircle(c, x, y, s, 0x312E81, 0x1E1B4B);
         draw_logo(c, cx, y + s * 0.2f, s * 0.58f, 255);
         break;
-    case ICON_BROWSER: {         /* navigateur : fenêtre avec onglet, barre d'adresse et globe */
+    case ICON_BROWSER: {         /* navigateur : l'icône de Google Chrome, sinon une fenêtre avec un globe */
+        if (browser_icon(c, x, y, s)) break;
         squircle(c, x, y, s, 0x38BDF8, 0x4338CA);
         gfx_rrect(c, x + s * 0.17f, y + s * 0.22f, s * 0.66f, s * 0.56f, s * 0.08f, 0xF2FFFFFF);
         gfx_rrect(c, x + s * 0.17f, y + s * 0.22f, s * 0.3f, s * 0.1f, s * 0.04f, 0xFF6366F1);

@@ -73,7 +73,7 @@ static void view_draw(window_t *w, canvas_t *c) {
     view_t *v = w->data;
     gfx_fill(c, R(0, 0, c->w, c->h), 0x40000000);
     if (v->bad) {
-        text_center(c, &font_body, R(0, c->h / 2 - 12, c->w, 24), "Image illisible ici (fichier abîmé ou format WebP, AVIF…) : ouvrez-la dans Chromium.", C_MUTED);
+        text_center(c, &font_body, R(0, c->h / 2 - 12, c->w, 24), "Image illisible ici (fichier abîmé ou format WebP, AVIF…) : ouvrez-la dans Google Chrome.", C_MUTED);
         return;
     }
     int bw = c->w - 32, bh = c->h - 56;

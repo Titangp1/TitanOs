@@ -13,6 +13,10 @@ typedef struct {
     int job, job_kind;
     char job_if[16], result[160];
     uint64_t next_list, next_scan;
+    uint64_t opened, scan_t0;         /* ouverture de la fenêtre ; recherche demandée (Actualiser) */
+    char watch[33];                   /* réseau enregistré en cours de connexion : son mot de passe marche-t-il ? */
+    uint64_t watch_t0;
+    bool watch_eap;
     char pending[33];                 /* réseau en attente du mot de passe */
     char pending_id[128];             /* identifiant (WPA2-Entreprise) */
     char menu_ssid[33];               /* réseau visé par le menu (clic droit) */
@@ -82,8 +86,12 @@ static void net_draw(window_t *w, canvas_t *c) {
     else if (s->wstate == WIFI_BLOCKED) {
         text_center(c, &font_body, R(L.x, L.y + 20, L.w, 24), "Le Wi-Fi est coupé par l'interrupteur de l'ordinateur.", C_TEXT);
         text_center(c, &font_body, R(L.x, L.y + 46, L.w, 24), "Sur le VAIO : glissez l'interrupteur WIRELESS (bord avant) sur ON.", C_MUTED);
-    } else if (!s->nnets)
-        text_center(c, &font_body, R(L.x, L.y + 20, L.w, 24), "Recherche des réseaux…", C_MUTED);
+    } else if (!s->nnets) {
+        bool long_ = plat_ms() - s->opened > 15000;
+        text_center(c, &font_body, R(L.x, L.y + 20, L.w, 24), long_ ? "Aucun réseau entendu pour l'instant." : "Recherche des réseaux…", C_MUTED);
+        if (long_) text_center(c, &font_small, R(L.x, L.y + 46, L.w, 20),
+                               "Vérifiez l'interrupteur WIRELESS du VAIO, rapprochez-vous de la box, puis « Actualiser ».", C_MUTED);
+    }
     for (int i = s->scroll; i < s->nnets && i < s->scroll + vis + 1; i++) {
         wifi_net_t *n = &s->nets[i];
         rect_t r = R(L.x + 6, L.y + 4 + (i - s->scroll) * ROW_H, L.w - 12, ROW_H - 4);
@@ -92,7 +100,7 @@ static void net_draw(window_t *w, canvas_t *c) {
         draw_wifi(c, r.x + 24, r.y + 20, 22, level_of(n->signal), C_TEXT, 0x40FFFFFF);
         text_fit(c, &font_bold, r.x + 50, r.y + 5, r.w - 230, n->ssid, C_TEXT);
         const char *kind = n->enterprise ? "Identifiant et mot de passe (WPA2-Entreprise)" : n->wpa3 ? "WPA3"
-                         : n->secure ? "Mot de passe (WPA2)" : "Ouvert : une page d'identification peut s'ouvrir dans Chromium";
+                         : n->secure ? "Mot de passe (WPA2)" : "Ouvert : une page d'identification peut s'ouvrir dans Google Chrome";
         text_fit(c, &font_small, r.x + 50, r.y + 24, r.w - 230, kind, C_MUTED);
         const char *tag = n->current ? (s->wstate == WIFI_CONNECTED ? "Connecté" : "Connexion…") : n->known ? "Enregistré" : "";
         text_draw(c, &font_small, r.x + r.w - 130, r.y + 14, tag, n->current ? C_TEXT : C_MUTED);
@@ -178,6 +186,20 @@ static void hidden_name_cb(const char *name, void *ctx) {
     dlg_password("Réseau masqué", label, hidden_password_cb, s);
 }
 
+/* (re)demande le mot de passe d'un réseau : après un refus, ou pour le changer */
+static void ask_password(window_t *w, net_t *s, const char *ssid, bool eap, bool refused) {
+    strlcpy(s->pending, ssid, sizeof s->pending);
+    cur_net = w;
+    char label[120];
+    if (eap) {
+        snprintf(label, sizeof label, "%sIdentifiant pour « %s »", refused ? "Refusé. " : "", ssid);
+        dlg_input("Connexion Wi-Fi", label, s->pending_id, eap_identity_cb, s);
+    } else {
+        snprintf(label, sizeof label, refused ? "Le mot de passe enregistré pour « %s » ne marche pas : entrez-le" : "Nouveau mot de passe de « %s »", ssid);
+        dlg_password("Connexion Wi-Fi", label, password_cb, s);
+    }
+}
+
 static void choose(window_t *w, net_t *s, wifi_net_t *n) {
     if (n->current && s->wstate == WIFI_CONNECTED) return;
     if (n->enterprise && !n->known) {
@@ -188,7 +210,12 @@ static void choose(window_t *w, net_t *s, wifi_net_t *n) {
         dlg_input("Connexion Wi-Fi", label, "", eap_identity_cb, s);
         return;
     }
-    if (!n->secure && !n->known) wm_toast("Réseau ouvert : si une page d'identification est demandée, ouvrez Chromium.");
+    if (!n->secure && !n->known) wm_toast("Réseau ouvert : si une page d'identification est demandée, ouvrez Google Chrome.");
+    if (n->secure && n->known) {
+        strlcpy(s->watch, n->ssid, sizeof s->watch);
+        s->watch_t0 = plat_ms();
+        s->watch_eap = n->enterprise;
+    }
     if (n->secure && !n->known) {
         strlcpy(s->pending, n->ssid, sizeof s->pending);
         cur_net = w;
@@ -208,7 +235,9 @@ static void ctx_cb(int i, void *ctx) {
     wifi_net_t *n = NULL;
     for (int k = 0; k < s->nnets; k++) if (!strcmp(s->nets[k].ssid, s->menu_ssid)) n = &s->nets[k];
     if (!n) return;
+    bool change = n->known && n->secure;                   /* menu : Se connecter, Changer..., Oublier */
     if (i == 0) choose(w, s, n);
+    else if (change && i == 1) ask_password(w, s, n->ssid, n->enterprise, false);
     else {
         plat_wifi_forget(n->ssid);
         n->known = false;                 /* tout de suite à l'écran, sans attendre le veilleur */
@@ -245,8 +274,11 @@ static void net_event(window_t *w, const event_t *e) {
         if (e->button == BTN_RIGHT) {
             rect_t cl = wm_client(w);
             strlcpy(s->menu_ssid, s->nets[s->hover].ssid, sizeof s->menu_ssid);
-            static const char *items[] = { "Se connecter", "Oublier ce réseau" };
-            wm_menu(cl.x + e->x, cl.y + e->y, items, s->nets[s->hover].known ? 2 : 1, ctx_cb, w);
+            wifi_net_t *n = &s->nets[s->hover];
+            static const char *items3[] = { "Se connecter", "Changer le mot de passe…", "Oublier ce réseau" };
+            static const char *items2[] = { "Se connecter", "Oublier ce réseau" };
+            if (n->known && n->secure) wm_menu(cl.x + e->x, cl.y + e->y, items3, 3, ctx_cb, w);
+            else wm_menu(cl.x + e->x, cl.y + e->y, items2, n->known ? 2 : 1, ctx_cb, w);
         } else choose(w, s, &s->nets[s->hover]);
     } else if (s->hover == H_HIDDEN) {
         cur_net = w;
@@ -254,6 +286,7 @@ static void net_event(window_t *w, const event_t *e) {
     } else if (s->hover == H_REFRESH) {
         plat_wifi_scan();
         s->next_list = plat_ms() + 2500;
+        s->scan_t0 = plat_ms();
         strlcpy(s->result, "Recherche des réseaux Wi-Fi…", sizeof s->result);
     } else if (s->hover >= H_WIRED && s->job < 0) {
         int k = s->hover - H_WIRED, idx = -1;
@@ -301,6 +334,23 @@ static void net_tick(window_t *w, uint64_t now) {
             wm_invalidate(w);
         }
     }
+    /* « Actualiser » : au bout de 5 s, le résultat remplace « Recherche… » */
+    if (s->scan_t0 && now - s->scan_t0 > 5000) {
+        s->scan_t0 = 0;
+        if (s->nnets) snprintf(s->result, sizeof s->result, "%d réseau%s trouvé%s.", s->nnets, s->nnets > 1 ? "x" : "", s->nnets > 1 ? "s" : "");
+        else strlcpy(s->result, "Aucun réseau trouvé.", sizeof s->result);
+        wm_invalidate(w);
+    }
+    /* réseau enregistré : si son mot de passe est refusé (ou rien après 25 s), on le redemande */
+    if (s->watch[0]) {
+        if (s->wstate == WIFI_CONNECTED && !strcmp(s->wssid, s->watch)) s->watch[0] = 0;
+        else if (s->wstate == WIFI_REFUSED || now - s->watch_t0 > 25000) {
+            char ssid[33];
+            strlcpy(ssid, s->watch, sizeof ssid);
+            s->watch[0] = 0;
+            ask_password(w, s, ssid, s->watch_eap, true);
+        }
+    }
     /* recherche régulière ; plus espacée une fois connecté (chaque recherche quitte un instant le canal) */
     if (now >= s->next_scan && s->wstate != WIFI_NONE && s->wstate != WIFI_CONNECTING) {
         s->next_scan = now + (s->wstate == WIFI_CONNECTED ? 30000 : 8000);
@@ -325,6 +375,7 @@ void app_network_open(void) {
     if (!s) return;
     s->job = -1;
     s->hover = H_NONE;
+    s->opened = plat_ms();
     refresh(s);
     plat_wifi_scan();
     w = wm_open("Réseau", ICON_NETWORK, 640, 560, WF_SINGLE | WF_RESIZABLE);

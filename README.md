@@ -40,7 +40,7 @@ Quelques programmes d'Alpine sont embarqués pour ce qui ne se réinvente pas :
 | **Mises à jour automatiques** | Une fois en ligne, TitanOs cherche une version plus récente ici, la télécharge en HTTPS, vérifie ses sommes SHA-256 et l'installe. Il suffit ensuite de redémarrer. |
 | **Installation** | Depuis la clé, TitanOs se copie sur le disque interne ou sur une autre clé USB, avec vos fichiers. |
 | **Intégration au portable** | Batterie, touches Fn (luminosité, volume), couvercle, bouton d'alimentation, mise en veille, températures, interrupteur Wi-Fi du VAIO. |
-| **Navigateur web** | Chromium, la base libre de Google Chrome, s'installe tout seul dès la première connexion à Internet et s'ouvre dans une fenêtre TitanOs. Les téléchargements vont dans *Téléchargements*, le son passe par le haut-parleur. |
+| **Navigateur web** | Google Chrome (le vrai, par Flatpak) s'installe tout seul dès la première connexion à Internet et s'ouvre dans une fenêtre TitanOs. Les téléchargements vont dans *Téléchargements* ; le son passe par PulseAudio et le haut-parleur. |
 | **Logithèque** | LibreOffice, VS Code, Discord, GIMP, Python et Node.js s'installent en un clic. Chaque application graphique a sa propre fenêtre et rejoint le menu Démarrer avec son icône. |
 | **Applications Linux** | `sudo apk add htop` dans le Terminal installe un programme d'Alpine. Il reste installé dans l'espace des applications créé au premier démarrage. |
 | **Sécurité** | Le Terminal tourne sous le compte `titan`, sans droits d'administrateur. `sudo` demande le mot de passe de session ; sans mot de passe défini, il refuse. |
@@ -60,7 +60,7 @@ Quelques programmes d'Alpine sont embarqués pour ce qui ne se réinvente pas :
 <td><img src="docs/captures/mises-a-jour.png" alt="Mises à jour"></td>
 </tr>
 <tr>
-<td><img src="docs/captures/chromium.png" alt="Installation de Chromium"></td>
+<td><img src="docs/captures/chromium.png" alt="Installation du navigateur"></td>
 <td><img src="docs/captures/systeme.png" alt="Système"></td>
 </tr>
 </table>
@@ -82,9 +82,9 @@ Il faut 512 Mo de mémoire au minimum. Une fois TitanOs installé, les nouvelles
 
 | Application | Rôle |
 |---|---|
-| **Chromium** | Navigateur web complet (onglets, favoris, mots de passe, téléchargements, vidéos avec le son), avec la disposition de clavier de TitanOs. |
+| **Google Chrome** | Le navigateur de Google, installé depuis Flathub : onglets, compte Google, favoris, téléchargements, vidéos avec le son. Il tourne sous le compte `titan`, avec la disposition de clavier de TitanOs. |
 | **Logithèque** | Installe et désinstalle LibreOffice, VS Code, Discord (Flathub), GIMP, Python 3 et Node.js. Les installations se font une à la fois, avec une barre de progression. |
-| **Fichiers** | Dossiers et fichiers : créer, renommer (F2), dupliquer, supprimer avec confirmation. Chaque fichier s'ouvre avec la bonne application : textes dans le Bloc-notes, images dans la visionneuse, PDF, vidéos, musique et pages web dans Chromium. Les archives (zip, tar.gz, tar.xz…) s'extraient d'un double-clic. Les clés USB branchées apparaissent, avec un bouton *Éjecter*. |
+| **Fichiers** | Dossiers et fichiers : créer, renommer (F2), dupliquer, supprimer avec confirmation. Chaque fichier s'ouvre avec la bonne application : textes dans le Bloc-notes, images dans la visionneuse, PDF, vidéos, musique et pages web dans Google Chrome. Les archives (zip, tar.gz, tar.xz…) s'extraient d'un double-clic. Les clés USB branchées apparaissent, avec un bouton *Éjecter*. |
 | **Terminal** | Vrai terminal (VT100/xterm, 256 couleurs) avec bash, sous le compte `titan`. `sudo` pour l'administration (mot de passe de session). Commandes de BusyBox, plus lsblk, lscpu, lspci, lsusb, findmnt, nano, less, htop, tree, zip, iw. `aide` les présente. |
 | **Bloc-notes** | Édition UTF-8, sélection, copier/coller, Ctrl+S / Ctrl+O. Avertit avant de fermer un texte non enregistré. |
 | **Image** | Visionneuse JPEG (séquentiel et progressif, orientation EXIF), PNG, GIF, BMP et PPM, ajustée à la fenêtre ; ← → pour l'image suivante. |
@@ -119,7 +119,7 @@ TitanOs est réglé pour le **Sony VAIO série F (VPCF11)**.
 | Écran | Carte NVIDIA GeForce GT 330M (puce GT216) avec le pilote libre `nouveau` : 1920×1080 à 60 Hz, double tampon. Chaque image est envoyée à la carte au rafraîchissement de l'écran, puis la suivante est préparée aussitôt. Les mélanges sont calculés 4 pixels à la fois (SSE2), et la copie vers la mémoire vidéo contourne le cache. Au démarrage, le chargeur prend la résolution de l'écran, même si la carte ne la propose qu'en 16 ou 24 bits (image tramée). Sinon, il utilise des images dessinées pour le mode 1280×1024 du BIOS, aux bonnes proportions. Le pointeur est affiché par la carte (plan « curseur »). |
 | Wi-Fi | Intel Centrino Advanced-N 6200 (`iwlwifi`, micrologiciel officiel d'Intel, sans coexistence Bluetooth ni économie d'énergie) ou Atheros AR9287 (`ath9k`). L'interrupteur WIRELESS est détecté et expliqué. |
 | Câble | Marvell Yukon (`sky2`) : le branchement est surveillé, l'adresse est demandée tout de suite. Câble, partage USB d'un téléphone et Wi-Fi ont chacun leur priorité : Internet passe par le meilleur lien branché. |
-| Son | HD Audio (Realtek ALC275), volume réglable aux touches Fn. Les applications (Chromium...) passent par ALSA, réglée sur cette sortie avec un mélangeur logiciel. |
+| Son | HD Audio (Realtek ALC275), volume réglable aux touches Fn. Les applications passent par PulseAudio (Chrome, Discord) ou ALSA, réglée sur cette sortie avec un mélangeur logiciel. |
 
 Sur les autres PC, les pilotes Intel (`i915`), QEMU et VirtIO sont inclus. Sans pilote adapté, l'écran reste à la résolution donnée par le BIOS.
 
@@ -133,8 +133,8 @@ Branchez la clé sur un autre ordinateur pour lire ces fichiers.
 
 ## Limites actuelles
 
-- **Chromium**, mais pas Google Chrome : Google ne publie pas Chrome pour ce type de système (Linux avec musl). Chromium tourne dans un serveur X en mémoire (Xvfb), dessiné par le processeur : la navigation est fluide, mais les vidéos lourdes le sont moins. Il prend 900 Mo dans l'espace des applications.
-- Les autres applications graphiques Linux ne sont pas encore intégrées : le pont X11 de Chromium pourra être étendu à d'autres programmes.
+- **Google Chrome** passe par Flatpak : Google ne le publie que pour les Linux « glibc », et Alpine utilise musl. Il tourne dans un serveur X en mémoire (Xvfb), dessiné par le processeur : la navigation est fluide, les vidéos lourdes le sont moins. Il prend environ 1 Go dans l'espace des applications.
+- Les applications graphiques Linux passent par la Logithèque (LibreOffice, VS Code, Discord, GIMP) : chacune a son propre serveur X en mémoire.
 - Le dessin se fait au processeur : la carte graphique sert à l'affichage et à la synchronisation, pas à la 3D.
 - Les mises à jour sont vérifiées par HTTPS et SHA-256, pas encore par une signature.
 

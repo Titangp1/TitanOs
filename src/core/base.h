@@ -25,8 +25,8 @@ typedef __builtin_va_list va_list;
 #define false 0
 #define NULL  ((void *)0)
 
-#define TITANOS_VERSION "Bêta 27"
-#define TITANOS_BUILD   27             /* numéro de version, comparé aux mises à jour publiées */
+#define TITANOS_VERSION "Bêta 28"
+#define TITANOS_BUILD   28             /* numéro de version, comparé aux mises à jour publiées */
 #define countof(a) ((int)(sizeof(a) / sizeof((a)[0])))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -155,7 +155,7 @@ int   plat_volumes(void *list, int max);                  /* volumes branchés (
 bool  plat_eject(const char *path);                       /* démonte un volume */
 void  plat_random(void *buf, size_t n);                    /* octets aléatoires */
 void  plat_rtc_save(void);
-/* navigateur Chromium (serveur X en mémoire) */
+/* navigateur Google Chrome (Flatpak, serveur X en mémoire) */
 enum { BR_NONE, BR_INSTALLING, BR_READY, BR_ERROR };
 int   plat_browser_state(char *msg, int n, int *percent);   /* BR_* */
 bool  plat_browser_install(void);
@@ -166,6 +166,7 @@ void  plat_browser_input(int type, int detail, int x, int y);       /* événeme
 void  plat_browser_stop(void);
 void  plat_browser_resize(int w, int h);
 void  plat_browser_open_url(const char *url);              /* nouvel onglet (ou au démarrage) */
+bool  plat_browser_is_chrome(void);                         /* Google Chrome installé (sinon : rien, ou l'ancien Chromium) */
 /* installations d'applications (apk, Flatpak) : une à la fois, dans l'ordre */
 enum { INS_NONE, INS_WAITING, INS_RUNNING, INS_DONE, INS_FAILED };
 bool  plat_app_install(const char *id, const char *script); /* script : commandes shell */
@@ -179,7 +180,7 @@ void  plat_xapp_resize(int x, int w, int h);
 void  plat_xapp_manage(int x);                              /* place les nouvelles fenêtres de l'application */
 bool  plat_xapp_close(int x);                               /* demande polie (WM_DELETE_WINDOW) */
 void  plat_xapp_stop(int x);
-#define BROWSER_XAPP 0                                      /* Chromium : poignée 0 */
+#define BROWSER_XAPP 0                                      /* le navigateur : poignée 0 */
 /* pointeur matériel (plan « curseur » de la carte graphique) */
 void  plat_cursor_move(int x, int y);
 int   plat_brightness(int set);                             /* set<0 : lecture ; 0-100 ou -1 */

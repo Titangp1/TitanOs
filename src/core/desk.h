@@ -118,6 +118,7 @@ void      wm_request_close(window_t *w);   /* comme un clic sur ×  (peut demand
 void      wm_invalidate(window_t *w);
 void      wm_damage_client(window_t *w);   /* la surface a été modifiée directement : la réafficher */
 void      browser_autoinstall(bool online);
+bool      browser_icon(canvas_t *c, float x, float y, float s);   /* icône de Google Chrome (si installé) */
 #define   DOCK_H_PUBLIC 64
 void      wm_set_title(window_t *w, const char *t);
 void      wm_resize(window_t *w, int client_w, int client_h);

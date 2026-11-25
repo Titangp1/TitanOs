@@ -82,7 +82,7 @@ static const char *const TEXT_EXT[] = { ".txt", ".md", ".cfg", ".conf", ".sh", "
     ".ts", ".css", ".json", ".ini", ".csv", ".xml", ".yml", ".yaml", ".toml", ".srt", ".nfo", ".tex", ".bat", ".ps1", ".rs",
     ".go", ".java", ".lua", ".sql", ".diff", ".patch", NULL };
 static const char *const IMAGE_EXT[] = { ".png", ".jpg", ".jpeg", ".jpe", ".bmp", ".gif", ".ppm", ".pgm", NULL };
-/* ouverts dans Chromium : documents, médias, pages web, images modernes */
+/* ouverts dans Google Chrome : documents, médias, pages web, images modernes */
 static const char *const WEB_EXT[] = { ".pdf", ".html", ".htm", ".svg", ".webp", ".avif", ".mp4", ".m4v", ".webm", ".mkv", ".mov",
     ".ogv", ".mp3", ".m4a", ".ogg", ".oga", ".opus", ".wav", ".flac", ".aac", NULL };
 static const char *const ARCHIVE_EXT[] = { ".zip", ".tar", ".tar.gz", ".tgz", ".tar.xz", ".txz", ".tar.bz2", ".tbz2", ".gz", NULL };
@@ -124,7 +124,7 @@ void open_path(const char *path) {
     if (ext_in(path, ARCHIVE_EXT)) { extract(path); return; }
     if (ext_in(path, WEB_EXT)) {
         if (plat_browser_state(NULL, 0, NULL) != BR_READY) {
-            dlg_message("Fichiers", "Ce fichier s'ouvre avec Chromium, qui n'est pas encore installé : il s'installe dès que TitanOs a Internet.");
+            dlg_message("Fichiers", "Ce fichier s'ouvre avec Google Chrome, qui n'est pas encore installé : il s'installe dès que TitanOs a Internet.");
             return;
         }
         char url[700];
@@ -134,7 +134,7 @@ void open_path(const char *path) {
         return;
     }
     if (looks_like_text(path)) { app_notes_open(path); return; }
-    dlg_message("Fichiers", "TitanOs ne sait pas ouvrir ce type de fichier. Les documents PDF, vidéos, musiques et pages web s'ouvrent dans Chromium.");
+    dlg_message("Fichiers", "TitanOs ne sait pas ouvrir ce type de fichier. Les documents PDF, vidéos, musiques et pages web s'ouvrent dans Google Chrome.");
 }
 
 /* archives : extraites dans un dossier du même nom, à côté */

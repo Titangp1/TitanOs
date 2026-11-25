@@ -2,7 +2,7 @@
 #include "desk.h"
 
 static const char *const names[APP_COUNT] = {
-    "Fichiers", "Terminal", "Bloc-notes", "Calculatrice", "Paramètres", "Système", "Réseau", "Snake", "À propos", "Mises à jour", "Chromium",
+    "Fichiers", "Terminal", "Bloc-notes", "Calculatrice", "Paramètres", "Système", "Réseau", "Snake", "À propos", "Mises à jour", "Google Chrome",
     "Logithèque",
 };
 const char *app_name(int icon) {

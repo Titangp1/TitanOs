@@ -189,26 +189,36 @@ int plat_app_state(const char *id, char *msg, int n, int *percent) {
 }
 
 /* ================================================================== */
-/* Chromium : installation                                              */
+/* Google Chrome : installation                                         */
 /* ================================================================== */
-static const char CHROMIUM_SCRIPT[] =
-    "apk add --no-progress chromium xvfb setxkbmap font-dejavu font-liberation alsa-lib";
+/* Le vrai Google Chrome n'existe que pour les systèmes « glibc » : il est installé par
+ * Flatpak (Flathub, com.google.Chrome), qui télécharge le paquet officiel de Google et
+ * fournit les bibliothèques dont il a besoin. Avec lui : D-Bus (session) et PulseAudio (son).
+ * L'ancien Chromium est désinstallé une fois Chrome en place. */
+#define CHROME_ID "com.google.Chrome"
+static const char CHROME_SCRIPT[] =
+    "mkdir -p /var/tmp && apk add --no-progress xvfb setxkbmap flatpak dbus pulseaudio pulseaudio-alsa font-dejavu && "
+    "flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo && "
+    "flatpak install -y --noninteractive --system flathub " CHROME_ID " && "
+    "{ apk del --no-progress chromium >/dev/null 2>&1; rm -rf /root/.config/chromium /root/.cache/chromium; true; }";
 
 static const char *chromium_path(void) {
     if (path_exists("/usr/bin/chromium-browser")) return "/usr/bin/chromium-browser";
     if (path_exists("/usr/bin/chromium")) return "/usr/bin/chromium";
     return NULL;
 }
-static bool installed(void) { return chromium_path() && path_exists("/usr/bin/Xvfb"); }
+static bool chrome_installed(void) { return path_exists("/var/lib/flatpak/app/" CHROME_ID "/current") && path_exists("/usr/bin/flatpak"); }
+static bool installed(void) { return (chrome_installed() || chromium_path()) && path_exists("/usr/bin/Xvfb"); }
+bool plat_browser_is_chrome(void) { return chrome_installed() && path_exists("/usr/bin/Xvfb"); }
 
 bool plat_browser_install(void) {
-    if (installed()) return false;
-    return plat_app_install("chromium", CHROMIUM_SCRIPT);
+    if (plat_browser_is_chrome()) return false;
+    return plat_app_install("chrome", CHROME_SCRIPT);
 }
 
 int plat_browser_state(char *msg, int n, int *percent) {
     char m[160];
-    int pc = -1, st = plat_app_state("chromium", m, sizeof m, &pc);
+    int pc = -1, st = plat_app_state("chrome", m, sizeof m, &pc);
     if (percent) *percent = pc;
     int r;
     if (st == INS_RUNNING || st == INS_WAITING) r = BR_INSTALLING;
@@ -216,8 +226,8 @@ int plat_browser_state(char *msg, int n, int *percent) {
     else if (st == INS_FAILED) r = BR_ERROR;
     else r = BR_NONE;
     if (msg) {
-        if (r == BR_NONE) strlcpy(msg, "Chromium n'est pas encore installé.", (size_t)n);
-        else if (r == BR_INSTALLING && st == INS_RUNNING) snprintf(msg, (size_t)n, "Chromium : %s", m);
+        if (r == BR_NONE) strlcpy(msg, "Google Chrome n'est pas encore installé.", (size_t)n);
+        else if (r == BR_INSTALLING && st == INS_RUNNING) snprintf(msg, (size_t)n, "Google Chrome : %s", m);
         else strlcpy(msg, m, (size_t)n);
     }
     return r;
@@ -239,47 +249,147 @@ typedef struct {
     const uint8_t *fb;
     size_t fb_size;
     int fb_off, fb_pitch;
-    char cmd[1200];                  /* commande de l'application (vide : Chromium) */
+    char cmd[1200];                  /* commande de l'application (vide : le navigateur) */
+    bool user;                       /* lancée sous le compte titan (pas root) */
 } xs_t;
 static xs_t XS[XN];
-static char start_url[700];          /* adresse à ouvrir au lancement de Chromium */
+static char start_url[700];          /* adresse à ouvrir au lancement du navigateur */
 
-static int spawn_env(char *const *argv, char *const *env) {
+/* Les applications tournent sous le compte « titan » (uid 1000), comme le Terminal : elles
+ * n'ont pas les droits d'administrateur. Seul le serveur X reste à root. */
+#define UID_USER 1000
+static int spawn_as(char *const *argv, char *const *env, bool user) {
     int pid = sys_fork();
     if (pid == 0) {
         sys_setsid();
         int nul = sys_open("/dev/null", O_RDWR, 0);
         if (nul >= 0) { sys_dup2(nul, 0); sys_dup2(nul, 1); sys_dup2(nul, 2); }
+        if (user) {
+            static const uint32_t groups[] = { UID_USER, 18 /* audio */, 27 /* video */ };
+            sc2(__NR_setgroups, countof(groups), (long)groups);
+            if (sc3(__NR_setresgid, UID_USER, UID_USER, UID_USER) != 0 || sc3(__NR_setresuid, UID_USER, UID_USER, UID_USER) != 0) sys_exit(126);
+            sys_chdir("/home/titan");
+        }
         sys_execve(argv[0], argv, env);
         sys_exit(127);
     }
     return pid;
 }
+static int spawn_env(char *const *argv, char *const *env) { return spawn_as(argv, env, false); }
+
+static bool user_ok(void) { return path_exists("/home/titan"); }
+
+/* Flatpak sous un compte ordinaire : il faut les espaces de noms utilisateur du noyau */
+static bool userns_ok(void) {
+    char v[32];
+    if (read_file("/proc/sys/user/max_user_namespaces", v, sizeof v) > 0 && atoi(v) <= 0) return false;
+    if (read_file("/proc/sys/kernel/unprivileged_userns_clone", v, sizeof v) > 0 && v[0] == '0') return false;
+    return true;
+}
 
 /* environnement d'une application sur l'écran X n° disp */
-static char **xenv(int disp) {
+static char **xenv_for(int disp, bool user) {
     static char dbuf[16];
     snprintf(dbuf, sizeof dbuf, "DISPLAY=:%d", disp);
-    static char *env[] = { dbuf, "HOME=/root", "LANG=fr_FR.UTF-8", "LANGUAGE=fr", "PATH=/usr/bin:/bin:/usr/sbin:/sbin",
-                           "XDG_CONFIG_HOME=/root/.config", "XDG_RUNTIME_DIR=/run/xdg",
-                           "XDG_DATA_DIRS=/var/lib/flatpak/exports/share:/usr/local/share:/usr/share",
-                           "NO_AT_BRIDGE=1", "GTK_A11Y=none", NULL };
+    static char *env[20];
+    int k = 0;
+    env[k++] = dbuf;
+    env[k++] = "LANG=fr_FR.UTF-8";
+    env[k++] = "LANGUAGE=fr";
+    env[k++] = "PATH=/usr/bin:/bin:/usr/sbin:/sbin";
+    env[k++] = "XDG_DATA_DIRS=/var/lib/flatpak/exports/share:/usr/local/share:/usr/share";
+    env[k++] = "NO_AT_BRIDGE=1";
+    env[k++] = "GTK_A11Y=none";
+    if (user) {
+        env[k++] = "HOME=/home/titan";
+        env[k++] = "USER=titan";
+        env[k++] = "LOGNAME=titan";
+        env[k++] = "XDG_RUNTIME_DIR=/run/user/1000";
+        if (path_exists("/run/user/1000/bus")) env[k++] = "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus";
+    } else {
+        env[k++] = "HOME=/root";
+        env[k++] = "XDG_CONFIG_HOME=/root/.config";
+        env[k++] = "XDG_RUNTIME_DIR=/run/xdg";
+    }
+    env[k] = NULL;
     return env;
+}
+static char **xenv(int disp) { return xenv_for(disp, false); }
+
+/* ---- services de la session de titan : dossier d'exécution, D-Bus, son (PulseAudio) ---- */
+static int bus_pid = -1, pulse_pid = -1;
+static bool alive_pid(int pid) {
+    if (pid <= 0) return false;
+    char p[32];
+    snprintf(p, sizeof p, "/proc/%d", pid);
+    return path_exists(p);
+}
+static void snd_cb(const char *name, int type, void *ctx) {
+    (void)type; (void)ctx;
+    char p[64];
+    snprintf(p, sizeof p, "/dev/snd/%s", name);
+    sc3(__NR_chown, (long)p, 0, 18 /* audio */);
+    sc2(__NR_chmod, (long)p, 0660);
+}
+static void user_services(void) {
+    mkdirs("/run/user/1000");
+    sc3(__NR_chown, (long)"/run/user", 0, 0);
+    sc3(__NR_chown, (long)"/run/user/1000", UID_USER, UID_USER);
+    sc2(__NR_chmod, (long)"/run/user/1000", 0700);
+    for_each_dir("/dev/snd", snd_cb, NULL);                   /* la carte son, pour le groupe audio */
+    char **env = xenv_for(0, true);
+    if (!alive_pid(bus_pid) && path_exists("/usr/bin/dbus-daemon")) {
+        sys_unlink("/run/user/1000/bus");
+        char *argv[] = { "/usr/bin/dbus-daemon", "--session", "--address=unix:path=/run/user/1000/bus", "--nofork", "--nopidfile", NULL };
+        bus_pid = spawn_as(argv, env, true);
+        for (int i = 0; i < 40 && !path_exists("/run/user/1000/bus"); i++) sleep_ms(25);
+        klog("session de titan : D-Bus %s", path_exists("/run/user/1000/bus") ? "prêt" : "absent");
+        env = xenv_for(0, true);
+    }
+    if (!alive_pid(pulse_pid) && path_exists("/usr/bin/pulseaudio")) {
+        /* sortie : « default » d'ALSA (la carte du haut-parleur, avec mélangeur logiciel) ;
+         * libérée après 3 s de silence, pour les sons de TitanOs */
+        static const char pa[] =
+            "load-module module-alsa-sink device=default sink_name=titanos tsched=0\n"
+            "load-module module-native-protocol-unix auth-anonymous=1\n"
+            "load-module module-suspend-on-idle timeout=3\n"
+            "load-module module-always-sink\n"
+            "set-default-sink titanos\n";
+        write_file("/run/user/1000/titanos.pa", pa);
+        sc3(__NR_chown, (long)"/run/user/1000/titanos.pa", UID_USER, UID_USER);
+        char *argv[] = { "/usr/bin/pulseaudio", "-n", "-F", "/run/user/1000/titanos.pa", "--daemonize=no",
+                         "--exit-idle-time=-1", "--disallow-exit", NULL };
+        pulse_pid = spawn_as(argv, env, true);
+        klog("session de titan : son (PulseAudio) lancé (pid %d)", pulse_pid);
+    }
 }
 
 /* dossiers de l'utilisateur (téléchargements, documents...) : ceux de TitanOs, visibles dans
- * Fichiers, au lieu de dossiers cachés dans /root */
+ * Fichiers, au lieu de dossiers cachés */
 static void user_dirs(void) {
     const char *h = plat_home();
     if (!h || !h[0]) return;
-    mkdirs("/root/.config");
     char buf[1200];
     snprintf(buf, sizeof buf,
              "XDG_DESKTOP_DIR=\"%s\"\nXDG_DOWNLOAD_DIR=\"%s/Téléchargements\"\nXDG_DOCUMENTS_DIR=\"%s/Documents\"\n"
              "XDG_PICTURES_DIR=\"%s/Images\"\nXDG_MUSIC_DIR=\"%s/Musique\"\nXDG_VIDEOS_DIR=\"%s/Vidéos\"\n",
              h, h, h, h, h, h);
     char old[1200] = "";
+    mkdirs("/root/.config");
     if (read_file("/root/.config/user-dirs.dirs", old, sizeof old) <= 0 || strcmp(old, buf)) write_file("/root/.config/user-dirs.dirs", buf);
+    if (user_ok()) {
+        mkdirs("/home/titan/.config");
+        sc3(__NR_chown, (long)"/home/titan/.config", UID_USER, UID_USER);
+        old[0] = 0;
+        if (read_file("/home/titan/.config/user-dirs.dirs", old, sizeof old) <= 0 || strcmp(old, buf)) {
+            write_file("/home/titan/.config/user-dirs.dirs", buf);
+            sc3(__NR_chown, (long)"/home/titan/.config/user-dirs.dirs", UID_USER, UID_USER);
+        }
+        char t[256];
+        snprintf(t, sizeof t, "%s/Téléchargements", h);
+        struct stat st;
+        if (sc4(__NR_newfstatat, AT_FDCWD, (long)"/home/titan/Downloads", (long)&st, 0x100) != 0) sys_symlink(t, "/home/titan/Downloads");
+    }
     static const char *const sub[] = { "Téléchargements", "Documents", "Images", "Musique", "Vidéos" };
     for (int i = 0; i < countof(sub); i++) {
         char p[256];
@@ -288,12 +398,14 @@ static void user_dirs(void) {
     }
 }
 
-static int xs_start(int i, int w, int h, const char *cmd) {
+static int xs_start(int i, int w, int h, const char *cmd, bool user) {
     xs_t *x = &XS[i];
     if (x->used) return i;
     if (!path_exists("/usr/bin/Xvfb")) return -1;
     memset(x, 0, sizeof *x);
     x->used = true;
+    x->user = user && user_ok();
+    if (x->user) user_services();
     x->disp = i + 1;
     x->xfd = x->xvfb_pid = x->app_pid = -1;
     x->scr_w = x->win_w = w;
@@ -321,7 +433,8 @@ static int xs_start(int i, int w, int h, const char *cmd) {
     x->xvfb_pid = spawn_env(argv, xenv(x->disp));
     x->started = x->xvfb_pid > 0;
     if (!x->started) { x->used = false; return -1; }
-    klog("X :%d : serveur %dx%d lancé%s%s", x->disp, w, h, cmd ? " pour " : " pour Chromium", cmd ? cmd : "");
+    klog("X :%d : serveur %dx%d lancé%s%s%s", x->disp, w, h, cmd ? " pour " : " pour le navigateur", cmd ? cmd : "",
+         x->user ? " (compte titan)" : " (root)");
     return i;
 }
 
@@ -575,20 +688,31 @@ static void xs_launch(xs_t *x) {
     spawn_env(kb, xenv(x->disp));
     if (x->cmd[0]) {
         char *argv[] = { "/bin/busybox", "sh", "-c", x->cmd, NULL };
-        x->app_pid = spawn_env(argv, xenv(x->disp));
+        x->app_pid = spawn_as(argv, xenv_for(x->disp, x->user), x->user);
         klog("X :%d : application lancée (pid %d)", x->disp, x->app_pid);
         return;
     }
-    const char *cp = chromium_path();
     char size[48];
     snprintf(size, sizeof size, "--window-size=%d,%d", x->win_w, x->win_h);
-    char *argv[] = { (char *)cp, "--no-sandbox", "--test-type", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
-                     "--password-store=basic", "--disable-dev-shm-usage", "--window-position=0,0", size, "--start-maximized",
-                     "--disk-cache-size=268435456", "--lang=fr", "--user-data-dir=/root/.config/chromium",
-                     start_url[0] ? start_url : "https://www.google.fr", NULL };
-    x->app_pid = spawn_env(argv, xenv(x->disp));
+    const char *url = start_url[0] ? start_url : "https://www.google.fr";
+    if (chrome_installed()) {
+        /* Google Chrome : accès aux clés et au disque (/media) pour ouvrir et enregistrer */
+        char *argv[] = { "/usr/bin/flatpak", "run", "--filesystem=/media", "--filesystem=xdg-download", CHROME_ID,
+                         "--no-sandbox", "--test-type", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
+                         "--password-store=basic", "--window-position=0,0", size, "--start-maximized", "--lang=fr",
+                         (char *)url, NULL };
+        x->app_pid = spawn_as(argv, xenv_for(x->disp, x->user), x->user);
+        klog("Google Chrome : lancé (pid %d)", x->app_pid);
+    } else {
+        char *argv[] = { (char *)chromium_path(), "--no-sandbox", "--test-type", "--disable-gpu", "--no-first-run",
+                         "--no-default-browser-check", "--password-store=basic", "--disable-dev-shm-usage",
+                         "--window-position=0,0", size, "--start-maximized", "--disk-cache-size=268435456", "--lang=fr",
+                         x->user ? "--user-data-dir=/home/titan/.config/chromium" : "--user-data-dir=/root/.config/chromium",
+                         (char *)url, NULL };
+        x->app_pid = spawn_as(argv, xenv_for(x->disp, x->user), x->user);
+        klog("Chromium : lancé (pid %d), en attendant Google Chrome", x->app_pid);
+    }
     start_url[0] = 0;                       /* adresse transmise : pas rouverte au prochain lancement */
-    klog("Chromium : lancé (pid %d)", x->app_pid);
 }
 
 static bool xs_frame(xs_t *x, uint32_t *dst, int stride, int w, int h) {
@@ -657,7 +781,8 @@ static bool xs_cursor(xs_t *x, canvas_t *img, int *hx, int *hy) {
 
 /* ---- interface générique : poignée = numéro du serveur X ---- */
 int plat_xapp_start(const char *cmd, int w, int h) {
-    for (int i = 1; i < XN; i++) if (!XS[i].used) return xs_start(i, w, h, cmd);
+    bool user = !strstr(cmd, "flatpak") || userns_ok();
+    for (int i = 1; i < XN; i++) if (!XS[i].used) return xs_start(i, w, h, cmd, user);
     return -1;
 }
 bool plat_xapp_frame(int i, uint32_t *dst, int stride, int w, int h) { return i >= 0 && i < XN && xs_frame(&XS[i], dst, stride, w, h); }
@@ -672,11 +797,11 @@ bool plat_xapp_close(int i) { return i >= 0 && i < XN && xs_close_request(&XS[i]
 void plat_xapp_stop(int i) { if (i >= 0 && i < XN) xs_stop(&XS[i]); }
 bool plat_xapp_cursor(int i, canvas_t *img, int *hx, int *hy) { return i >= 0 && i < XN && xs_cursor(&XS[i], img, hx, hy); }
 
-/* ---- Chromium : serveur X n° 0 (écran :1) ---- */
+/* ---- le navigateur : serveur X n° 0 (écran :1) ---- */
 bool plat_browser_start(int w, int h) {
     if (XS[0].used) return true;
     if (!installed()) return false;
-    return xs_start(0, w, h, NULL) == 0;
+    return xs_start(0, w, h, NULL, !chrome_installed() || userns_ok()) == 0;
 }
 bool plat_browser_frame(uint32_t *dst, int stride, int w, int h) { return xs_frame(&XS[0], dst, stride, w, h); }
 bool plat_browser_running(void) { return xs_running(&XS[0]); }
@@ -684,11 +809,19 @@ void plat_browser_input(int type, int detail, int x, int y) { plat_xapp_input(0,
 void plat_browser_resize(int w, int h) { if (XS[0].used) xs_resize(&XS[0], w, h); }
 void plat_browser_stop(void) { xs_stop(&XS[0]); }
 
-/* Chromium déjà lancé : un second lancement avec le même profil transmet l'adresse à la
+/* Navigateur déjà lancé : un second lancement avec le même profil transmet l'adresse à la
  * fenêtre ouverte (nouvel onglet). Sinon elle sera ouverte au démarrage. */
 void plat_browser_open_url(const char *url) {
     if (XS[0].app_pid > 0 && plat_browser_running()) {
-        char *argv[] = { (char *)chromium_path(), "--no-sandbox", "--user-data-dir=/root/.config/chromium", (char *)url, NULL };
-        spawn_env(argv, xenv(1));
+        bool u = XS[0].user;
+        if (chrome_installed()) {
+            char *argv[] = { "/usr/bin/flatpak", "run", "--filesystem=/media", "--filesystem=xdg-download", CHROME_ID,
+                             "--no-sandbox", "--test-type", (char *)url, NULL };
+            spawn_as(argv, xenv_for(1, u), u);
+        } else {
+            char *argv[] = { (char *)chromium_path(), "--no-sandbox",
+                             u ? "--user-data-dir=/home/titan/.config/chromium" : "--user-data-dir=/root/.config/chromium", (char *)url, NULL };
+            spawn_as(argv, xenv_for(1, u), u);
+        }
     } else strlcpy(start_url, url, sizeof start_url);
 }

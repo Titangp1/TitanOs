@@ -1,5 +1,5 @@
-/* TitanOs - Chromium : fenêtre qui affiche le navigateur et lui transmet souris et clavier
- * (le serveur X et Chromium tournent à côté, voir src/linux/browser.c) */
+/* TitanOs - Google Chrome : fenêtre qui affiche le navigateur et lui transmet souris et
+ * clavier (le serveur X et Chrome tournent à côté, voir src/linux/xbridge.c) */
 #include "desk.h"
 
 typedef struct {
@@ -21,7 +21,7 @@ static void br_draw(window_t *w, canvas_t *c) {
     char msg[160];
     int pc = -1, st = plat_browser_state(msg, sizeof msg, &pc);
     draw_icon(c, ICON_BROWSER, c->w / 2 - 40, c->h / 2 - 150, 80);
-    text_center(c, &font_h2, R(0, c->h / 2 - 54, c->w, 32), "Chromium", C_TEXT);
+    text_center(c, &font_h2, R(0, c->h / 2 - 54, c->w, 32), "Google Chrome", C_TEXT);
     if (st == BR_READY) {
         text_center(c, &font_body, R(0, c->h / 2 - 12, c->w, 22), "Démarrage du navigateur…", C_TEXT2);
     } else if (st == BR_INSTALLING) {
@@ -30,9 +30,9 @@ static void br_draw(window_t *w, canvas_t *c) {
         text_center(c, &font_small, R(0, c->h / 2 + 46, c->w, 20), "Vous pouvez continuer à utiliser TitanOs pendant ce temps.", C_MUTED);
     } else {
         text_center(c, &font_body, R(0, c->h / 2 - 12, c->w, 22),
-                    st == BR_ERROR ? msg : "Le navigateur web, base libre de Google Chrome.", st == BR_ERROR ? 0xFFFCA5A5 : C_TEXT2);
-        text_center(c, &font_small, R(0, c->h / 2 + 12, c->w, 20), "Environ 370 Mo à télécharger, installé une fois pour toutes.", C_MUTED);
-        ui_button(c, install_btn(c), st == BR_ERROR ? "Réessayer" : "Installer Chromium", BTN_ACCENT, b->hover);
+                    st == BR_ERROR ? msg : "Le navigateur de Google, installé depuis Flathub.", st == BR_ERROR ? 0xFFFCA5A5 : C_TEXT2);
+        text_center(c, &font_small, R(0, c->h / 2 + 12, c->w, 20), "Environ 1 Go à télécharger, installé une fois pour toutes.", C_MUTED);
+        ui_button(c, install_btn(c), st == BR_ERROR ? "Réessayer" : "Installer Google Chrome", BTN_ACCENT, b->hover);
     }
 }
 
@@ -114,7 +114,8 @@ void app_browser_open(void) {
     /* l'écran X a la taille de la fenêtre agrandie ; la fenêtre s'ouvre en grand */
     b->w = scr_w - 16;
     b->h = scr_h - DOCK_H_PUBLIC - 30 - TITLE_H;
-    window_t *w = wm_open("Chromium", ICON_BROWSER, 1100, 700, WF_SINGLE | WF_RESIZABLE);
+    window_t *w = wm_open(plat_browser_is_chrome() || plat_browser_state(NULL, 0, NULL) != BR_READY ? "Google Chrome" : "Chromium",
+                          ICON_BROWSER, 1100, 700, WF_SINGLE | WF_RESIZABLE);
     if (!w) { free(b); return; }
     w->minw = 480;
     w->minh = 320;
@@ -129,11 +130,57 @@ void app_browser_open(void) {
     w->on_close = br_close;
 }
 
-/* installation automatique : Chromium est installé dès que TitanOs a Internet */
+/* installation automatique : Google Chrome est installé dès que TitanOs a Internet (et
+ * remplace l'ancien Chromium s'il était là) */
 void browser_autoinstall(bool online) {
     static bool tried;
     if (tried || !online) return;
-    if (plat_browser_state(NULL, 0, NULL) != BR_NONE) return;
+    if (plat_browser_is_chrome() || plat_browser_state(NULL, 0, NULL) == BR_INSTALLING) return;
     tried = true;
-    if (plat_browser_install()) wm_toast("Installation de Chromium en arrière-plan…");
+    if (plat_browser_install()) wm_toast("Installation de Google Chrome en arrière-plan…");
+}
+
+/* icône du navigateur : celle de Google Chrome une fois installé (son fichier PNG) */
+bool png_decode(const uint8_t *f, size_t n, canvas_t *out);
+bool browser_icon(canvas_t *c, float x, float y, float s) {
+    static canvas_t mip[4];
+    static bool tried;
+    static uint64_t next;
+    if (!mip[0].px && !tried && plat_browser_is_chrome()) {
+        tried = true;
+        static const char *const paths[] = {
+            "/var/lib/flatpak/exports/share/icons/hicolor/128x128/apps/com.google.Chrome.png",
+            "/var/lib/flatpak/exports/share/icons/hicolor/256x256/apps/com.google.Chrome.png",
+            "/var/lib/flatpak/exports/share/icons/hicolor/64x64/apps/com.google.Chrome.png" };
+        for (int i = 0; i < 3 && !mip[0].px; i++) {
+            char *d;
+            size_t n;
+            if (plat_readfile(paths[i], &d, &n) != 0) continue;
+            if (!png_decode((const uint8_t *)d, n, &mip[0])) canvas_free(&mip[0]);
+            free(d);
+        }
+        for (int m = 1; m < 4 && mip[0].px; m++) {         /* réductions par moitiés : icône nette à toute taille */
+            const canvas_t *sc = &mip[m - 1];
+            if (sc->w < 32) break;
+            mip[m] = canvas_new(sc->w / 2, sc->h / 2);
+            if (!mip[m].px) break;
+            for (int yy = 0; yy < mip[m].h; yy++)
+                for (int xx = 0; xx < mip[m].w; xx++) {
+                    const uint32_t *a = sc->px + (size_t)(2 * yy) * sc->stride + 2 * xx, *b2 = a + sc->stride;
+                    uint32_t r = 0;
+                    for (int sh = 0; sh < 32; sh += 8)
+                        r |= ((((a[0] >> sh) & 255) + ((a[1] >> sh) & 255) + ((b2[0] >> sh) & 255) + ((b2[1] >> sh) & 255) + 2) / 4) << sh;
+                    mip[m].px[(size_t)yy * mip[m].stride + xx] = r;
+                }
+        }
+    }
+    if (!mip[0].px) {                                      /* pas encore installé : on réessaiera plus tard */
+        uint64_t now = plat_ms();
+        if (tried && now >= next) { next = now + 10000; tried = false; }
+        return false;
+    }
+    int m = 0;
+    while (m < 3 && mip[m + 1].px && mip[m + 1].w >= s) m++;
+    gfx_blit_scaled(c, x, y, s, s, &mip[m], R(0, 0, mip[m].w, mip[m].h), 255);
+    return true;
 }

@@ -2,6 +2,29 @@
 
 Toutes les versions sont dans les [versions publiées](../../releases). Depuis la bêta 6, TitanOs se met à jour tout seul.
 
+## Bêta 28
+
+**Google Chrome remplace Chromium**
+- Le vrai **Google Chrome** est installé par Flatpak, depuis Flathub (`com.google.Chrome`). Flatpak télécharge le paquet officiel de Google et lui fournit les bibliothèques qu'il attend (glibc), qu'Alpine n'a pas.
+- Il s'installe tout seul à la première connexion à Internet : environ 1 Go à télécharger, une fois pour toutes. Une barre fluide suit l'installation.
+- L'ancien Chromium est désinstallé dès que Chrome est en place. En attendant, s'il était déjà là, il reste utilisable.
+- Chrome peut ouvrir et enregistrer des fichiers sur la clé, le disque et les clés USB (`/media`). Les téléchargements vont dans *Téléchargements*.
+- Son icône dans le dock, le menu et sur le bureau est celle de Google Chrome.
+
+**Applications sans droits d'administrateur, avec le son**
+- Google Chrome, LibreOffice, VS Code, Discord et GIMP tournent maintenant sous le compte **titan**, comme le Terminal, et non plus en root.
+- La session de titan a son bus D-Bus et un serveur de son (PulseAudio). Les vidéos de Chrome (YouTube…) et Discord ont le son. Le son passe par la sortie du haut-parleur, avec mélangeur logiciel ; il est libéré après 3 s de silence pour les sons de TitanOs.
+
+**Wi-Fi**
+- **« Actualiser » ne tourne plus à l'infini** : le message « Recherche des réseaux Wi-Fi… » n'était jamais remplacé. Au bout de 5 s, il indique le nombre de réseaux trouvés.
+- Si aucun réseau n'est entendu après 15 s, la liste le dit et donne quoi vérifier, au lieu de rester sur « Recherche… ».
+- **Mot de passe redemandé** : un réseau enregistré dont le mot de passe ne marche plus (refusé, ou pas de connexion après 25 s) redemande son mot de passe, ou son identifiant pour les réseaux d'entreprise. Avant, il fallait penser à « Oublier » le réseau.
+- Clic droit sur un réseau enregistré : nouveau choix « Changer le mot de passe… ».
+- Le voyant Wi-Fi du VAIO reste allumé tant que la radio est active, comme sous Windows : ce n'est pas un plantage.
+
+**Bureau**
+- Les noms d'icônes trop longs passent sur deux lignes (« Google / Chrome ») au lieu d'être coupés.
+
 ## Bêta 27
 
 **Wi-Fi : tous les types de réseaux**

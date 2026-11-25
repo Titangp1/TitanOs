@@ -424,7 +424,7 @@ static void focus_next(void) {
 /* fermeture demandée par l'utilisateur : la fenêtre peut d'abord demander confirmation */
 void wm_damage_client(window_t *w) { if (alive(w)) damage(wm_client(w), win_level(w)); }
 
-/* touches brutes pour une fenêtre qui les veut (Chromium) ; les raccourcis de TitanOs
+/* touches brutes pour une fenêtre qui les veut (navigateur, applications Linux) ; les raccourcis de TitanOs
  * (touche Windows, Alt+Tab, Alt+F4) et les touches Fn restent à TitanOs */
 bool core_raw_key_wanted(void) {
     return mode == MODE_DESK && !menu_open && !pop_open && alive(focused) && focused->raw_key && !focused->minimized;
@@ -828,10 +828,26 @@ static void draw_desk_icon(rect_t r, int i, int alpha) {
     uint32_t a = (uint32_t)alpha << 24;
     draw_icon(T, desk_icon_id(i), r.x + (r.w - 56) / 2, r.y + 8, 56);
     const char *n = desk_label(i);
-    int tw = MIN(text_width(&font_body, n), r.w + 8);
-    int x = r.x + (r.w - tw) / 2;
-    text_fit(T, &font_body, x, r.y + 71, tw, n, (uint32_t)(alpha * 0x99 / 255) << 24);
-    text_fit(T, &font_body, x, r.y + 70, tw, n, a | (C_TEXT & 0xFFFFFF));
+    int maxw = r.w + 8, len = (int)strlen(n), cut = len;
+    /* nom trop long : sur deux lignes, coupé à un espace (« Google / Chrome ») */
+    if (text_width(&font_body, n) > maxw) {
+        cut = 0;
+        for (int k = 1; k < len; k++) if (n[k] == ' ' && text_width_n(&font_body, n, k) <= maxw) cut = k;
+        if (!cut) cut = len;
+    }
+    for (int line = 0; line < 2; line++) {
+        const char *t = line ? n + cut + 1 : n;
+        int tl = line ? len - cut - 1 : cut;
+        if (tl <= 0) break;
+        char buf[128];
+        tl = MIN(tl, (int)sizeof buf - 1);
+        memcpy(buf, t, (size_t)tl);
+        buf[tl] = 0;
+        int tw = MIN(text_width(&font_body, buf), maxw);
+        int x = r.x + (r.w - tw) / 2, y = r.y + 70 + line * 17;
+        text_fit(T, &font_body, x, y + 1, tw, buf, (uint32_t)(alpha * 0x99 / 255) << 24);
+        text_fit(T, &font_body, x, y, tw, buf, a | (C_TEXT & 0xFFFFFF));
+    }
 }
 
 static void draw_desktop(void) {
@@ -2270,7 +2286,7 @@ static void poll_hardware(void) {
     char bm[160];
     static int last_br = -1;
     int br = plat_browser_state(bm, sizeof bm, NULL);
-    if (last_br == BR_INSTALLING && br == BR_READY) wm_toast("Chromium est installé : il est dans le dock.");
+    if (last_br == BR_INSTALLING && br == BR_READY) wm_toast("Google Chrome est installé : il est dans le dock.");
     last_br = br;
     strlcpy(wifi_ssid, ssid, sizeof wifi_ssid);
     net_wired = wired;
