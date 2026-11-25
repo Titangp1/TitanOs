@@ -65,8 +65,8 @@ static bool cmdline_has(const char *word) {
 static char started_ifs[16][16];
 static int nstarted;
 
-/* adresse automatique (DHCP) sur chaque carte réseau nouvellement apparue ;
- * pour le Wi-Fi, udhcpc attend simplement que la connexion soit établie */
+/* chaque carte réseau nouvellement apparue est allumée ; les adresses (DHCP) sont demandées
+ * par le veilleur, au bon moment : câble branché, ou Wi-Fi connecté */
 static void net_cb(const char *name, int type, void *ctx) {
     (void)type; (void)ctx;
     if (!strcmp(name, "lo") || str_starts(name, "sit") || str_starts(name, "p2p")) return;
@@ -74,14 +74,11 @@ static void net_cb(const char *name, int type, void *ctx) {
     if (nstarted >= 16) return;
     strlcpy(started_ifs[nstarted++], name, 16);
     iface_up(name);
-    char ifn[16];
-    strlcpy(ifn, name, sizeof ifn);
-    char pidf[48];
-    snprintf(pidf, sizeof pidf, "/run/udhcpc.%s.pid", ifn);
-    char *argv[] = { "/bin/busybox", "udhcpc", "-i", ifn, "-b", "-t", "4", "-T", "3", "-A", "5", "-p", pidf,
-                     "-s", "/etc/udhcpc.script", NULL };
-    spawn_quiet(argv);
-    klog("réseau : DHCP lancé sur %s", name);
+    char p[64], drv[48] = "?", link[128];
+    snprintf(p, sizeof p, "/sys/class/net/%s/device/driver", name);
+    long r = sys_readlink(p, link, sizeof link - 1);
+    if (r > 0) { link[r] = 0; const char *b = strrchr(link, '/'); strlcpy(drv, b ? b + 1 : link, sizeof drv); }
+    klog("réseau : carte %s (pilote %s) allumée", name, drv);
 }
 static void net_autostart(void) { for_each_dir("/sys/class/net", net_cb, NULL); }
 
@@ -293,6 +290,12 @@ static void start_journal(void) {
         " echo; echo '== piles des processus TitanOs';"
         " for p in /proc/[0-9]*; do [ \"$(cat $p/comm)\" = init ] && { echo \"-- ${p#/proc/}\"; cat $p/stack; }; done;"
         " echo; echo '== ligne de commande'; cat /proc/cmdline;"
+        " echo; echo '== reseau'; ip addr; ip route; cat /etc/resolv.conf;"
+        " for n in /sys/class/net/*; do echo \"${n##*/} etat=$(cat $n/operstate) lien=$(cat $n/carrier 2>/dev/null) vitesse=$(cat $n/speed 2>/dev/null)\"; done;"
+        " ps | grep -v grep | grep -E 'udhcpc|wpa_supplicant';"
+        " [ -x /usr/sbin/iw ] && { iw reg get; for w in /sys/class/net/*/wireless; do d=${w%/wireless}; d=${d##*/};"
+        " iw dev $d link; echo \"-- bornes connues du noyau ($d)\"; iw dev $d scan dump | grep -E '^BSS|SSID:|signal:|freq:'; done; };"
+        " [ -x /sbin/wpa_cli ] && for s in /run/wpa_supplicant/*; do wpa_cli -p /run/wpa_supplicant -i ${s##*/} scan_results; done;"
         " echo; echo '== entrees'; ls -l /dev/input /dev/dri; cat /proc/bus/input/devices;"
         " echo; echo '== pilotes'; cut -d' ' -f1 /proc/modules | tr '\\n' ' '; echo;"
         " echo; echo '== blocs'; cat /proc/partitions; echo; echo '== montages'; cat /proc/mounts;"
@@ -386,7 +389,7 @@ static void prepare_home(bool on_key, const char *storage) {
     if (first) {
         char p[256];
         snprintf(p, sizeof p, "%s/Bienvenue.txt", home);
-        const char *t = "Bienvenue dans TitanOs (bêta 24) !\n\n"
+        const char *t = "Bienvenue dans TitanOs (bêta 25) !\n\n"
                         "TitanOs tourne sur le noyau Linux : Linux fournit les pilotes (écran, clavier,\n"
                         "USB, Wi-Fi, son...), et tout le reste est écrit pour TitanOs.\n\n"
                         "Vos fichiers sont gardés sur la clé USB, dans le dossier Utilisateur.\n"

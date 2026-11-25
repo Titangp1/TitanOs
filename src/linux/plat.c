@@ -497,6 +497,25 @@ static void net_cb(const char *name, int type, void *ctx) {
 int plat_netifs(netif_t *list, int max) {
     net_ctx_t c = { list, 0, max };
     for_each_dir("/sys/class/net", net_cb, &c);
+    /* la carte par laquelle passe Internet : route par défaut de plus faible métrique */
+    static char rt[4096];
+    if (read_file("/proc/net/route", rt, sizeof rt) > 0) {
+        char best[16] = "";
+        long bm = -1;
+        for (char *l = strchr(rt, '\n'); l && l[1]; l = strchr(l + 1, '\n')) {
+            char ifn[16] = "";
+            int k = 0;
+            const char *q = l + 1;
+            while (*q && *q != '\t' && k < 15) ifn[k++] = *q++;
+            ifn[k] = 0;
+            if (*q != '\t' || strncmp(q + 1, "00000000", 8)) continue;          /* destination 0.0.0.0 */
+            const char *f = q;
+            for (int i = 0; i < 6 && f; i++) { f = strchr(f + 1, '\t'); }       /* 7e colonne : métrique */
+            long m = f ? strtol(f + 1, NULL, 10) : 0;
+            if (bm < 0 || m < bm) { bm = m; strlcpy(best, ifn, sizeof best); }
+        }
+        for (int i = 0; i < c.n; i++) list[i].internet = best[0] && !strcmp(list[i].name, best);
+    }
     return c.n;
 }
 

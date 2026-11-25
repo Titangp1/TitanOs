@@ -34,6 +34,121 @@ static void gov_cb(const char *name, int type, void *ctx) {
     write_file(p, (const char *)ctx);
 }
 
+/* ================================================================== */
+/* Câble Ethernet et partage USB d'un téléphone                         */
+/* ================================================================== */
+/* Le veilleur surveille le lien de chaque carte filaire : câble branché -> adresse demandée
+ * aussitôt ; débranché -> adresse retirée (Internet passe alors par la carte suivante,
+ * voir /etc/udhcpc.script). */
+typedef struct { char name[16]; int carrier; bool told; } wired_t;
+static wired_t wired[8];
+static int nwired;
+
+static void if_up(const char *name) {
+    int s = sys_socket(2, 2 | O_CLOEXEC, 0);
+    if (s < 0) return;
+    struct { char name[16]; short flags; char pad[22]; } ifr = { 0 };
+    strlcpy(ifr.name, name, sizeof ifr.name);
+    if (sys_ioctl(s, 0x8913 /* SIOCGIFFLAGS */, &ifr) == 0 && !(ifr.flags & 1)) {
+        ifr.flags |= 1 /* IFF_UP */;
+        sys_ioctl(s, 0x8914 /* SIOCSIFFLAGS */, &ifr);
+    }
+    sys_close(s);
+}
+
+static void spawn_detached(char *const *argv, char *const *env) {
+    int c = sys_fork();
+    if (c == 0) {
+        sys_setsid();
+        int nul = sys_open("/dev/null", O_RDWR, 0);
+        if (nul >= 0) { sys_dup2(nul, 0); sys_dup2(nul, 1); sys_dup2(nul, 2); }
+        sys_execve(argv[0], argv, env);
+        sys_exit(127);
+    }
+}
+
+/* arrête le udhcpc d'une carte (il rend son adresse : -R) */
+static void dhcp_stop(const char *ifn) {
+    char p[48], v[16], proc[32];
+    snprintf(p, sizeof p, "/run/udhcpc.%s.pid", ifn);
+    int pid = read_file(p, v, sizeof v) > 0 ? atoi(v) : 0;
+    snprintf(proc, sizeof proc, "/proc/%d", pid);
+    if (pid > 1 && path_exists(proc)) {
+        sys_kill(pid, 15);
+        for (int i = 0; i < 20 && path_exists(proc); i++) {
+            int st;
+            sys_wait4(-1, &st, WNOHANG_);
+            sleep_ms(25);
+        }
+    }
+    sys_unlink(p);
+}
+
+static void dhcp_deconfig(const char *ifn) {
+    char ienv[32];
+    snprintf(ienv, sizeof ienv, "interface=%s", ifn);
+    char *env[] = { ienv, "PATH=/usr/sbin:/usr/bin:/sbin:/bin", NULL };
+    char *argv[] = { "/bin/busybox", "sh", "/etc/udhcpc.script", "deconfig", NULL };
+    spawn_detached(argv, env);
+}
+
+static void dhcp_start(const char *ifn, bool release) {
+    dhcp_stop(ifn);
+    char p[48];
+    snprintf(p, sizeof p, "/run/udhcpc.%s.pid", ifn);
+    char ifc[16];
+    strlcpy(ifc, ifn, sizeof ifc);
+    char *a[] = { "/bin/busybox", "udhcpc", "-i", ifc, "-b", "-t", "6", "-T", "2", "-A", "4", "-x", "hostname:titanos",
+                  "-p", p, "-s", "/etc/udhcpc.script", release ? "-R" : NULL, NULL };
+    char *env[] = { "PATH=/usr/sbin:/usr/bin:/sbin:/bin", NULL };
+    spawn_detached(a, env);
+}
+
+static void wired_cb(const char *name, int type, void *ctx) {
+    (void)type; (void)ctx;
+    if (!strcmp(name, "lo") || str_starts(name, "sit") || str_starts(name, "p2p") || str_starts(name, "wl") ||
+        str_starts(name, "ip6") || str_starts(name, "tun") || str_starts(name, "dummy")) return;
+    char p[96], v[32];
+    snprintf(p, sizeof p, "/sys/class/net/%s/wireless", name);
+    if (path_exists(p)) return;
+    snprintf(p, sizeof p, "/sys/class/net/%s/device", name);
+    if (!path_exists(p)) return;                                 /* interfaces virtuelles : pas touchées */
+    wired_t *w = NULL;
+    for (int i = 0; i < nwired; i++) if (!strcmp(wired[i].name, name)) w = &wired[i];
+    if (!w) {
+        if (nwired >= countof(wired)) return;
+        w = &wired[nwired++];
+        memset(w, 0, sizeof *w);
+        strlcpy(w->name, name, sizeof w->name);
+        w->carrier = -1;
+    }
+    if_up(name);
+    snprintf(p, sizeof p, "/sys/class/net/%s/carrier", name);
+    int c = read_file(p, v, sizeof v) > 0 && v[0] == '1';
+    if (c == w->carrier) return;
+    bool usb = false;
+    char link[256];
+    snprintf(p, sizeof p, "/sys/class/net/%s/device", name);
+    long r = sys_readlink(p, link, sizeof link - 1);
+    if (r > 0) { link[r] = 0; usb = strstr(link, "-") && strstr(link, ":") && !strstr(link, "0000:"); }
+    if (c) {
+        snprintf(p, sizeof p, "/sys/class/net/%s/speed", name);
+        int mb = read_file(p, v, sizeof v) > 0 ? atoi(v) : 0;
+        if (usb) klog("réseau : partage de connexion USB sur %s, demande d'adresse", name);
+        else if (mb > 0) klog("réseau : câble branché sur %s (%d Mbit/s), demande d'adresse", name, mb);
+        else klog("réseau : câble branché sur %s, demande d'adresse", name);
+        dhcp_start(name, true);
+    } else if (w->carrier == 1) {
+        klog("réseau : %s débranché, adresse retirée", name);
+        dhcp_stop(name);
+        dhcp_deconfig(name);
+    } else if (!w->told) {
+        klog("réseau : %s prêt, pas de câble", name);
+        w->told = true;
+    }
+    w->carrier = c;
+}
+
 /* connexion Wi-Fi établie : demande une adresse tout de suite, sans attendre le prochain
  * essai de udhcpc (qui peut être 5 à 20 s plus tard) */
 static void dhcp_now(void) {
@@ -48,8 +163,8 @@ static void dhcp_now(void) {
         sys_setsid();
         int nul = sys_open("/dev/null", O_RDWR, 0);
         if (nul >= 0) { sys_dup2(nul, 0); sys_dup2(nul, 1); sys_dup2(nul, 2); }
-        char *argv[] = { "/bin/busybox", "udhcpc", "-i", iface, "-b", "-t", "4", "-T", "3", "-A", "5", "-p", p,
-                         "-s", "/etc/udhcpc.script", NULL };
+        char *argv[] = { "/bin/busybox", "udhcpc", "-i", iface, "-b", "-t", "4", "-T", "3", "-A", "5", "-x", "hostname:titanos",
+                         "-p", p, "-s", "/etc/udhcpc.script", NULL };
         sys_execve(argv[0], argv, g_envp);
         sys_exit(127);
     }
@@ -261,7 +376,28 @@ static int w_list(wifi_net_t *list, int max) {
     int n = 0, bss = 0;
     for (char *q = strchr(buf, '\n'); q && q[1]; q = strchr(q + 1, '\n')) bss++;
     static int last_bss = -1;
-    if (bss != last_bss) { klog("Wi-Fi : %d bornes entendues", bss); last_bss = bss; }
+    static uint64_t next_log;
+    if (bss != last_bss || plat_ms() >= next_log) {
+        /* détail pour le journal : nom, signal et canal de chaque borne entendue */
+        char det[400];
+        int k = 0;
+        det[0] = 0;
+        char *l = strchr(buf, '\n');
+        for (int i = 0; l && l[1] && i < 10 && k < (int)sizeof det - 60; i++) {
+            char *e = strchr(l + 1, '\n');
+            char line[200];
+            int len = e ? (int)(e - l - 1) : (int)strlen(l + 1);
+            if (len > (int)sizeof line - 1) len = sizeof line - 1;
+            memcpy(line, l + 1, (size_t)len);
+            line[len] = 0;
+            char *fq = field(line, 1), *lv = field(line, 2), *nm = field(line, 4);
+            if (fq && lv) k += snprintf(det + k, sizeof det - (size_t)k, "%s%.24s (%d dBm, %d MHz)", i ? ", " : "", nm && *nm ? nm : "masqué", atoi(lv), atoi(fq));
+            l = e;
+        }
+        klog("Wi-Fi : %d bornes entendues : %s", bss, det);
+        last_bss = bss;
+        next_log = plat_ms() + 60000;
+    }
     char *line = strchr(buf, '\n');            /* première ligne : en-têtes */
     while (line && *line && n < max) {
         line++;
@@ -433,7 +569,16 @@ static void helper_main(int out, int in) {
             }
         }
         static int last_state = -9;
-        if (s.wstate == WIFI_CONNECTED && last_state != WIFI_CONNECTED) dhcp_now();
+        static uint64_t wifi_lost;
+        if (s.wstate == WIFI_CONNECTED && last_state != WIFI_CONNECTED) { dhcp_now(); wifi_lost = 0; }
+        if (s.wstate != WIFI_CONNECTED && last_state == WIFI_CONNECTED) wifi_lost = plat_ms();
+        if (wifi_lost && plat_ms() - wifi_lost > 15000 && iface[0]) {   /* déconnecté depuis 15 s : adresse retirée */
+            wifi_lost = 0;
+            dhcp_stop(iface);
+            dhcp_deconfig(iface);
+            klog("Wi-Fi : déconnecté, adresse retirée");
+        }
+        for_each_dir("/sys/class/net", wired_cb, NULL);
         if (s.wstate != last_state) {
             static const char *const nm[] = { "aucune carte", "non connecté", "connexion", "connecté", "interrupteur sur OFF", "mot de passe refusé" };
             klog("Wi-Fi : %s%s%s (%d réseaux visibles)", nm[s.wstate + 1], s.wssid[0] ? " - " : "", s.wssid, s.nnets);

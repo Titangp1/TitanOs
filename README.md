@@ -90,7 +90,7 @@ Il faut 512 Mo de mémoire au minimum. Une fois TitanOs installé, les nouvelles
 | **Calculatrice** | À la souris ou au clavier. |
 | **Paramètres** | Personnalisation, écran, son, clavier et souris, réseau, date et heure, compte (mot de passe de session), système. |
 | **Système** | Machine, températures, batterie, matériel PCI/USB avec son pilote, processus. |
-| **Réseau** | Wi-Fi (réseaux, mot de passe affichable, réseaux enregistrés), câble, partage USB d'un téléphone, test de connexion. |
+| **Réseau** | Wi-Fi (réseaux, mot de passe affichable, réseaux enregistrés), câble, partage USB d'un téléphone. Le test de connexion vérifie chaque étape (adresse, box, Internet, DNS) et dit laquelle bloque. |
 | **Mises à jour** | Version installée, recherche sur GitHub, installation sur un disque ou une clé USB. |
 | **Snake**, **À propos** | |
 
@@ -116,8 +116,8 @@ TitanOs est réglé pour le **Sony VAIO série F (VPCF11)**.
 | Composant | Prise en charge |
 |---|---|
 | Écran | Carte NVIDIA GeForce GT 330M (puce GT216) avec le pilote libre `nouveau` : 1920×1080 à 60 Hz, double tampon. Chaque image est envoyée à la carte au rafraîchissement de l'écran, puis la suivante est préparée aussitôt. Les mélanges sont calculés 4 pixels à la fois (SSE2), et la copie vers la mémoire vidéo contourne le cache. Au démarrage, le chargeur prend la résolution de l'écran, même si la carte ne la propose qu'en 16 ou 24 bits (image tramée). Sinon, il utilise des images dessinées pour le mode 1280×1024 du BIOS, aux bonnes proportions. Le pointeur est affiché par la carte (plan « curseur »). |
-| Wi-Fi | Intel Centrino Advanced-N 6200 (`iwlwifi`, micrologiciel officiel d'Intel) ou Atheros AR9287 (`ath9k`). L'interrupteur WIRELESS est détecté et expliqué. |
-| Câble | Marvell Yukon (`sky2`), avec une adresse automatique dès le branchement. |
+| Wi-Fi | Intel Centrino Advanced-N 6200 (`iwlwifi`, micrologiciel officiel d'Intel, sans coexistence Bluetooth ni économie d'énergie) ou Atheros AR9287 (`ath9k`). L'interrupteur WIRELESS est détecté et expliqué. |
+| Câble | Marvell Yukon (`sky2`) : le branchement est surveillé, l'adresse est demandée tout de suite. Câble, partage USB d'un téléphone et Wi-Fi ont chacun leur priorité : Internet passe par le meilleur lien branché. |
 | Son | HD Audio (Realtek ALC275), volume réglable aux touches Fn. Les applications (Chromium...) passent par ALSA, réglée sur cette sortie avec un mélangeur logiciel. |
 
 Sur les autres PC, les pilotes Intel (`i915`), QEMU et VirtIO sont inclus. Sans pilote adapté, l'écran reste à la résolution donnée par le BIOS.

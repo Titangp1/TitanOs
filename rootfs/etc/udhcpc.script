@@ -1,20 +1,55 @@
 #!/bin/sh
-# TitanOs - appelé par « udhcpc » (BusyBox) : applique l'adresse reçue du réseau
+# TitanOs - appelé par « udhcpc » (BusyBox) : applique l'adresse reçue du réseau.
+#
+# Chaque carte a sa priorité (métrique de la route vers Internet) : câble 10, partage USB
+# d'un téléphone 50, Wi-Fi 600. Si plusieurs sont connectées, Internet passe par la plus
+# rapide ; si elle est débranchée, par la suivante. Chaque carte garde ses propres serveurs
+# de noms (DNS) dans /run/net, réunis dans /etc/resolv.conf dans le même ordre.
+
+log() { echo "<6>titanos: réseau : $*" > /dev/kmsg 2>/dev/null; }
+
+metric=10
+if [ -d "/sys/class/net/$interface/wireless" ]; then
+    metric=600
+elif readlink -f "/sys/class/net/$interface/device" 2>/dev/null | grep -q /usb; then
+    metric=50
+fi
+dnsfile="/run/net/$(printf %04d "$metric")-$interface.dns"
+mkdir -p /run/net
+
+dns_update() {
+    : > /etc/resolv.conf.new
+    for f in $(ls /run/net/*.dns 2>/dev/null | sort); do cat "$f" >> /etc/resolv.conf.new; done
+    [ -s /etc/resolv.conf.new ] || echo "nameserver 1.1.1.1" > /etc/resolv.conf.new
+    mv -f /etc/resolv.conf.new /etc/resolv.conf
+}
+
 case "$1" in
     deconfig)
         ip link set "$interface" up
         ip -4 addr flush dev "$interface"
+        rm -f /run/net/*-"$interface".dns
+        dns_update
+        ;;
+    leasefail|nak)
+        log "$interface : pas de réponse du serveur DHCP ($1)"
         ;;
     bound|renew)
-        ip -4 addr flush dev "$interface"
-        ip addr add "$ip/${mask:-24}" ${broadcast:+broadcast "$broadcast"} dev "$interface"
-        if [ -n "$router" ]; then
-            while ip route del default dev "$interface" 2>/dev/null; do :; done
-            for r in $router; do ip route add default via "$r" dev "$interface"; break; done
+        # renouvellement avec la même adresse : rien n'est coupé
+        if [ "$1" = bound ] || ! ip -4 addr show dev "$interface" | grep -q "inet $ip/"; then
+            ip -4 addr flush dev "$interface"
+            ip addr add "$ip/${mask:-24}" ${broadcast:+broadcast "$broadcast"} dev "$interface"
         fi
-        : > /etc/resolv.conf
-        for d in $dns; do echo "nameserver $d" >> /etc/resolv.conf; done
-        [ -s /etc/resolv.conf ] || echo "nameserver 1.1.1.1" > /etc/resolv.conf
+        if [ -n "$router" ]; then
+            while ip -4 route del default dev "$interface" 2>/dev/null; do :; done
+            for r in $router; do
+                ip route add default via "$r" dev "$interface" metric "$metric" && break
+            done
+        fi
+        : > "$dnsfile"
+        for d in $dns; do echo "nameserver $d" >> "$dnsfile"; done
+        dns_update
+        [ "$1" = bound ] && log "$interface : adresse $ip, passerelle ${router:-aucune}, DNS ${dns:-aucun}, priorité $metric"
         ;;
 esac
 exit 0

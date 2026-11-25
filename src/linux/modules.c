@@ -108,8 +108,11 @@ static bool insmod(const char *relpath) {
     /* réglages de certains pilotes : Wi-Fi Intel plus stable (pas d'agrégation 802.11n en
      * émission, ni d'économie d'énergie qui fait chuter la réception) */
     const char *params = "";
-    if (strstr(relpath, "/iwlwifi.ko")) params = "power_save=0 led_mode=1";     /* voyant allumé quand la radio l'est */
+    /* bt_coex_active=0 : la coexistence Bluetooth réduit la sensibilité de la radio quand un
+     * module Bluetooth séparé est câblé à la carte (VAIO) : peu de réseaux entendus */
+    if (strstr(relpath, "/iwlwifi.ko")) params = "power_save=0 led_mode=1 bt_coex_active=0";
     else if (strstr(relpath, "/iwldvm.ko")) params = "force_cam=1";
+    else if (strstr(relpath, "/cfg80211.ko")) params = "ieee80211_regdom=FR";        /* canaux et puissance de la France */
     int r = sys_finit_module(fd, params, 0);
     sys_close(fd);
     return r == 0 || r == -EEXIST;

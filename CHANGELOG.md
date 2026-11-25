@@ -2,6 +2,31 @@
 
 Toutes les versions sont dans les [versions publiées](../../releases). Depuis la bêta 6, TitanOs se met à jour tout seul.
 
+## Bêta 25
+
+**Câble Ethernet et partage USB : refaits**
+- **Le défaut principal** : quand le Wi-Fi avait déjà une route vers Internet, celle du câble était refusée (« la route existe déjà »). Le câble recevait une adresse, mais tout continuait de passer par le Wi-Fi.
+- **Priorités** : chaque carte a maintenant sa priorité. Câble d'abord, puis partage USB d'un téléphone, puis Wi-Fi. Si plusieurs sont connectées, Internet passe par la meilleure. Si on la débranche, la suivante prend le relais.
+- **Branchement surveillé** : le câble est surveillé en permanence. Branché, une adresse est demandée tout de suite. Débranché, son adresse et ses serveurs de noms sont retirés. Avant, l'adresse n'était demandée qu'une fois, au démarrage.
+- **Serveurs de noms (DNS)** : chaque carte garde les siens, réunis dans le même ordre de priorité. Une carte ne peut plus effacer ceux d'une autre.
+- **Renouvellement** : l'adresse est renouvelée sans couper la connexion (avant, elle était retirée puis remise).
+- **Nom de l'ordinateur** : TitanOs se présente à la box sous le nom « titanos ».
+
+**Wi-Fi**
+- Réception de la carte Intel 6200 : la coexistence Bluetooth est désactivée (`bt_coex_active=0`). Sur les portables où un module Bluetooth séparé est câblé à la carte, elle réduit la sensibilité de la radio : peu de réseaux entendus. Le pays (France) est donné dès le chargement du pilote.
+- Une fois connecté, la recherche de réseaux n'a lieu que toutes les 30 s : chaque recherche fait quitter un instant le canal de la box.
+- Si le Wi-Fi reste déconnecté plus de 15 s, son adresse est retirée : Internet passe alors par le câble ou le téléphone.
+
+**Application Réseau**
+- « Tester Internet » teste chaque étape et dit ce qui ne va pas : pas d'adresse, box qui ne répond pas, Internet coupé, ou noms de sites (DNS).
+- Chaque carte indique si Internet passe par elle. L'en-tête du Wi-Fi dit si Internet passe par le câble ou par le téléphone.
+- Messages plus clairs : « Branché, demande d'une adresse… », « Partage de connexion désactivé sur le téléphone ».
+
+**Journal (`journal-titanos.txt`)**
+- Nouvelle partie « réseau » : adresses, routes, DNS, état de chaque carte (lien, vitesse), processus DHCP.
+- Pour le Wi-Fi : pays réglé, liaison en cours, bornes vues par le noyau (outil `iw`) et par wpa_supplicant. Toutes les minutes : le nom, le signal (dBm) et le canal de chaque borne entendue.
+- Chaque branchement, débranchement et adresse reçue est noté.
+
 ## Bêta 24
 
 **Logithèque : installer des applications en un clic**

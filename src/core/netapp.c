@@ -52,13 +52,18 @@ static void net_draw(window_t *w, canvas_t *c) {
     net_t *s = w->data;
     draw_wifi(c, 34, 36, 26, s->wstate == WIFI_CONNECTED ? level_of(s->wsignal) : 0, C_TEXT, 0x50FFFFFF);
     text_draw(c, &font_title, 58, 14, "Wi-Fi", C_TEXT);
-    char st[96];
+    char st[160];
     if (s->wstate == WIFI_NONE) strlcpy(st, "Aucune carte Wi-Fi utilisable", sizeof st);
     else if (s->wstate == WIFI_CONNECTED) snprintf(st, sizeof st, "Connecté à « %s »", s->wssid);
     else if (s->wstate == WIFI_CONNECTING) strlcpy(st, "Connexion en cours…", sizeof st);
     else if (s->wstate == WIFI_BLOCKED) strlcpy(st, "Radio coupée par l'interrupteur", sizeof st);
     else if (s->wstate == WIFI_REFUSED) strlcpy(st, "Mot de passe refusé : clic droit sur le réseau, « Oublier », puis réessayez", sizeof st);
     else strlcpy(st, "Non connecté", sizeof st);
+    for (int i = 0; i < s->nifs; i++)
+        if (s->ifs[i].internet && strcmp(s->ifs[i].kind, "Wi-Fi")) {
+            size_t l = strlen(st);
+            snprintf(st + l, sizeof st - l, " · Internet passe par %s", !strcmp(s->ifs[i].kind, "Téléphone USB") ? "le téléphone" : "le câble");
+        }
     text_draw(c, &font_small, 58, 36, st, s->wstate == WIFI_CONNECTED ? 0xFF86EFAC : C_MUTED);
     if (s->wstate != WIFI_NONE) ui_button(c, refresh_rect(c), "Actualiser", BTN_NORMAL, s->hover == H_REFRESH);
 
@@ -100,8 +105,10 @@ static void net_draw(window_t *w, canvas_t *c) {
         char t[96];
         snprintf(t, sizeof t, "%s · %s", f->kind, f->name);
         text_draw(c, &font_bold, r.x + 50, r.y + 8, t, C_TEXT);
-        if (on) snprintf(t, sizeof t, "Connecté · %s", f->ip);
-        else strlcpy(t, !f->up ? "Désactivé" : !f->carrier ? "Câble débranché" : "Pas encore d'adresse", sizeof t);
+        bool usb = !strcmp(f->kind, "Téléphone USB");
+        if (on) snprintf(t, sizeof t, "Connecté · %s%s", f->ip, f->internet ? " · Internet passe par ici" : "");
+        else strlcpy(t, !f->up ? "Désactivé" : !f->carrier ? (usb ? "Partage de connexion désactivé sur le téléphone" : "Câble débranché")
+                                                           : "Branché, demande d'une adresse…", sizeof t);
         text_draw(c, &font_small, r.x + 50, r.y + 29, t, on ? 0xFF86EFAC : C_MUTED);
         bool busy = s->job >= 0 && s->job_kind == J_DHCP && !strcmp(s->job_if, f->name);
         ui_button(c, dhcp_rect(c, s, k), busy ? "Recherche…" : "Obtenir une adresse", BTN_NORMAL, s->hover == H_WIRED + k);
@@ -201,7 +208,16 @@ static void net_event(window_t *w, const event_t *e) {
             snprintf(s->result, sizeof s->result, "Demande d'adresse sur %s…", s->job_if);
         }
     } else if (s->hover == H_PING && s->job < 0) {
-        const char *argv[] = { "/bin/busybox", "ping", "-c", "2", "-W", "3", "1.1.1.1", NULL };
+        /* par étapes : route, box, Internet, noms : la réponse dit ce qui ne va pas */
+        static const char script[] =
+            "r=$(ip -4 route show default | head -n 1);"
+            "[ -n \"$r\" ] || { echo \"Aucune carte n'a d'adresse : pas de chemin vers Internet.\"; exit 1; };"
+            "dev=$(echo \"$r\" | sed -n 's/.* dev \\([^ ]*\\).*/\\1/p'); gw=$(echo \"$r\" | sed -n 's/.*via \\([^ ]*\\).*/\\1/p');"
+            "[ -z \"$gw\" ] || ping -c 1 -W 2 \"$gw\" >/dev/null 2>&1 || ping -c 1 -W 2 \"$gw\" >/dev/null 2>&1 || { echo \"La box ($gw, par $dev) ne répond pas.\"; exit 1; };"
+            "ping -c 2 -W 3 1.1.1.1 >/dev/null 2>&1 || { echo \"La box répond (par $dev), mais pas Internet.\"; exit 1; };"
+            "nslookup github.com >/dev/null 2>&1 || { echo \"Internet répond, mais pas les noms de sites (DNS).\"; exit 1; };"
+            "echo \"Internet fonctionne (par $dev).\"";
+        const char *argv[] = { "/bin/busybox", "sh", "-c", script, NULL };
         s->job = plat_spawn(argv);
         s->job_kind = J_PING;
         strlcpy(s->result, "Test de la connexion…", sizeof s->result);
@@ -217,14 +233,21 @@ static void net_tick(window_t *w, uint64_t now) {
         if (r != -1) {
             if (s->job_kind == J_DHCP)
                 snprintf(s->result, sizeof s->result, r == 0 ? "%s : adresse obtenue." : "%s : aucun serveur n'a répondu.", s->job_if);
-            else
-                strlcpy(s->result, r == 0 ? "Internet répond." : "Pas de réponse d'Internet.", sizeof s->result);
+            else {
+                char *nl = strchr(out, '\n');
+                if (nl) *nl = 0;
+                strlcpy(s->result, out[0] ? out : r == 0 ? "Internet répond." : "Pas de réponse d'Internet.", sizeof s->result);
+            }
             s->job = -1;
             s->next_list = 0;
             wm_invalidate(w);
         }
     }
-    if (now >= s->next_scan && s->wstate != WIFI_NONE && s->wstate != WIFI_CONNECTING) { s->next_scan = now + 10000; plat_wifi_scan(); }
+    /* recherche régulière ; plus espacée une fois connecté (chaque recherche quitte un instant le canal) */
+    if (now >= s->next_scan && s->wstate != WIFI_NONE && s->wstate != WIFI_CONNECTING) {
+        s->next_scan = now + (s->wstate == WIFI_CONNECTED ? 30000 : 8000);
+        plat_wifi_scan();
+    }
     if (now >= s->next_list) {
         s->next_list = now + 1500;
         refresh(s);

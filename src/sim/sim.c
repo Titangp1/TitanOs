@@ -58,7 +58,7 @@ int plat_listdir(const char *path, dirent_t **out) {
     return n;
 }
 int plat_readfile(const char *path, char **data, size_t *len) {
-    const char *t = "Bienvenue dans TitanOs (bêta 24) !\n\nCe Bloc-notes enregistre vos textes sur la clé USB.\n"
+    const char *t = "Bienvenue dans TitanOs (bêta 25) !\n\nCe Bloc-notes enregistre vos textes sur la clé USB.\n"
                     "Le système tourne sur le noyau Linux, mais tout ce que vous voyez est fait maison.\n";
     if (str_ends(path, ".cfg")) return -1;
     *len = strlen(t);
@@ -81,7 +81,7 @@ int plat_pty_read(int id, char *buf, int n) {
     if (pty_sent[id & 7]) return 0;
     pty_sent[id & 7] = true;
     const char *s =
-        "\x1b[1;35mTitanOs bêta 24\x1b[0m - noyau Linux 6.18.65 - BusyBox 1.37\r\n"
+        "\x1b[1;35mTitanOs bêta 25\x1b[0m - noyau Linux 6.18.65 - BusyBox 1.37\r\n"
         "Tapez \x1b[1maide\x1b[0m pour la liste des commandes.\r\n\r\n"
         "\x1b[1;32mtitan\x1b[0m@\x1b[36mtitanos\x1b[0m:\x1b[1;34m~\x1b[0m$ ls\r\n"
         "\x1b[1;34mDocuments\x1b[0m  \x1b[1;34mImages\x1b[0m  \x1b[1;34mMusique\x1b[0m  Bienvenue.txt  vacances.png\r\n"
@@ -151,7 +151,7 @@ int plat_netifs(netif_t *l, int max) {
     strlcpy(l[0].name, "eth0", 16); strlcpy(l[0].kind, "Ethernet", 16); strlcpy(l[0].mac, "54:42:49:a1:2b:3c", 18);
     l[0].up = true;
     strlcpy(l[1].name, "wlan0", 16); strlcpy(l[1].kind, "Wi-Fi", 16); strlcpy(l[1].mac, "00:27:10:5e:aa:01", 18);
-    strlcpy(l[1].ip, "192.168.1.42", 16); l[1].up = l[1].carrier = true;
+    strlcpy(l[1].ip, "192.168.1.42", 16); l[1].up = l[1].carrier = l[1].internet = true;
     return 2;
 }
 void plat_power(int a) { (void)a; }
