@@ -12,7 +12,13 @@ typedef struct {
     volume_t vols[6];
     int nvols;
     uint64_t next_vols;
+    int job;                          /* copie ou déplacement en cours (identifiant), -1 sinon */
+    bool job_cut;
 } files_t;
+
+/* presse-papiers de fichiers : partagé par toutes les fenêtres Fichiers */
+static char clip_path[512];
+static bool clip_cut;
 
 /* lignes de la barre latérale : emplacements, puis clés USB (identifiants 100+i, éjecter 200+i) */
 static rect_t place_rect(int i) { return R(10, 36 + i * 38, SIDE_W - 20, 34); }
@@ -210,10 +216,12 @@ static void do_delete(bool ok, void *ctx) {
     if (cur_win && cur_win->used) files_load(cur_win, f);
 }
 
+static void do_copy(files_t *f, bool cut);
+static void do_paste(window_t *w, files_t *f);
 static void do_duplicate(window_t *w, files_t *f) {
     if (f->sel < 0) return;
     dirent_t *e = &f->ent[f->sel];
-    if (e->dir) { wm_toast("La copie de dossiers n'est pas encore gérée."); return; }
+    if (e->dir) { do_copy(f, false); do_paste(w, f); return; }
     char a[512], b[512], name[300];
     path_join(a, sizeof a, f->path, e->name);
     const char *dot = strrchr(e->name, '.');
@@ -225,6 +233,44 @@ static void do_duplicate(window_t *w, files_t *f) {
     }
     if (plat_copy(a, b) != 0) wm_toast("Impossible de dupliquer.");
     files_load(w, f);
+}
+
+/* ---- copier, couper, coller (fichiers et dossiers, d'une clé à l'autre aussi) ---- */
+static void do_copy(files_t *f, bool cut) {
+    if (f->sel < 0 || f->sel >= f->n) return;
+    path_join(clip_path, sizeof clip_path, f->path, f->ent[f->sel].name);
+    clip_cut = cut;
+    char m[360];
+    snprintf(m, sizeof m, cut ? "« %s » coupé : collez-le dans un autre dossier." : "« %s » copié.", f->ent[f->sel].name);
+    wm_toast(m);
+}
+
+static void do_paste(window_t *w, files_t *f) {
+    if (!clip_path[0]) { wm_toast("Rien à coller : copiez d'abord un fichier (Ctrl+C)."); return; }
+    if (f->job >= 0) { wm_toast("Une copie est déjà en cours."); return; }
+    if (!plat_exists(clip_path, NULL)) { wm_toast("Le fichier copié n'existe plus."); clip_path[0] = 0; return; }
+    const char *base = strrchr(clip_path, '/');
+    base = base ? base + 1 : clip_path;
+    size_t pl = strlen(clip_path);
+    if (!strncmp(f->path, clip_path, pl) && (f->path[pl] == '/' || !f->path[pl])) { wm_toast("Impossible de coller un dossier dans lui-même."); return; }
+    char dst[512], name[300];
+    path_join(dst, sizeof dst, f->path, base);
+    if (clip_cut && !strcmp(dst, clip_path)) return;               /* même dossier : rien à faire */
+    const char *dot = strrchr(base, '.');
+    bool isdir = false;
+    plat_exists(clip_path, &isdir);
+    for (int k = 2; plat_exists(dst, NULL) && k < 200; k++) {        /* nom déjà pris : « nom (2).ext » */
+        if (dot && dot != base && !isdir) snprintf(name, sizeof name, "%.*s (%d)%s", (int)(dot - base), base, k, dot);
+        else snprintf(name, sizeof name, "%s (%d)", base, k);
+        path_join(dst, sizeof dst, f->path, name);
+    }
+    const char *argv[] = { "/bin/busybox", clip_cut ? "mv" : "cp", clip_cut ? "-f" : "-a", clip_path, dst, NULL };
+    f->job = plat_spawn(argv);
+    f->job_cut = clip_cut;
+    if (f->job < 0) { wm_toast("Collage impossible."); return; }
+    wm_toast(clip_cut ? "Déplacement en cours…" : "Copie en cours…");
+    if (clip_cut) clip_path[0] = 0;
+    (void)w;
 }
 
 static void ask_rename(window_t *w, files_t *f) {
@@ -243,15 +289,16 @@ static void ask_delete(window_t *w, files_t *f) {
 }
 
 /* menu contextuel : ouvrir d'abord, puis modifier, puis créer */
-enum { C_OPEN, C_NOTES, C_DESK, C_RENAME, C_DUP, C_DEL, C_MKDIR, C_MKFILE, C_SEP = -1 };
-static const char *const ctx_file[] = { "Ouvrir", "Ouvrir avec le Bloc-notes", "Ajouter au bureau", "-", "Renommer", "Dupliquer",
-                                        "Supprimer", "-", "Nouveau dossier", "Nouveau fichier" };
-static const signed char act_file[] = { C_OPEN, C_NOTES, C_DESK, C_SEP, C_RENAME, C_DUP, C_DEL, C_SEP, C_MKDIR, C_MKFILE };
-static const char *const ctx_dir[] = { "Ouvrir", "Ajouter au bureau", "-", "Renommer", "Dupliquer", "Supprimer", "-",
-                                       "Nouveau dossier", "Nouveau fichier" };
-static const signed char act_dir[] = { C_OPEN, C_DESK, C_SEP, C_RENAME, C_DUP, C_DEL, C_SEP, C_MKDIR, C_MKFILE };
-static const char *const ctx_empty[] = { "Nouveau dossier", "Nouveau fichier" };
-static const signed char act_empty[] = { C_MKDIR, C_MKFILE };
+enum { C_OPEN, C_NOTES, C_DESK, C_RENAME, C_DUP, C_DEL, C_MKDIR, C_MKFILE, C_COPY, C_CUT, C_PASTE, C_SEP = -1 };
+static const char *const ctx_file[] = { "Ouvrir", "Ouvrir avec le Bloc-notes", "Ajouter au bureau", "-", "Copier", "Couper", "Coller",
+                                        "-", "Renommer", "Dupliquer", "Supprimer", "-", "Nouveau dossier", "Nouveau fichier" };
+static const signed char act_file[] = { C_OPEN, C_NOTES, C_DESK, C_SEP, C_COPY, C_CUT, C_PASTE, C_SEP, C_RENAME, C_DUP, C_DEL, C_SEP,
+                                        C_MKDIR, C_MKFILE };
+static const char *const ctx_dir[] = { "Ouvrir", "Ajouter au bureau", "-", "Copier", "Couper", "Coller", "-", "Renommer", "Dupliquer",
+                                       "Supprimer", "-", "Nouveau dossier", "Nouveau fichier" };
+static const signed char act_dir[] = { C_OPEN, C_DESK, C_SEP, C_COPY, C_CUT, C_PASTE, C_SEP, C_RENAME, C_DUP, C_DEL, C_SEP, C_MKDIR, C_MKFILE };
+static const char *const ctx_empty[] = { "Coller", "-", "Nouveau dossier", "Nouveau fichier" };
+static const signed char act_empty[] = { C_PASTE, C_SEP, C_MKDIR, C_MKFILE };
 static const signed char *ctx_act;
 static int ctx_nact;
 
@@ -270,6 +317,9 @@ static void ctx_cb(int i, void *ctx) {
     case C_RENAME: ask_rename(w, f); break;
     case C_DUP: do_duplicate(w, f); break;
     case C_DEL: ask_delete(w, f); break;
+    case C_COPY: do_copy(f, false); break;
+    case C_CUT: do_copy(f, true); break;
+    case C_PASTE: do_paste(w, f); break;
     case C_MKDIR: dlg_input("Nouveau dossier", "Nom du dossier", "Nouveau dossier", do_mkdir, f); break;
     case C_MKFILE: dlg_input("Nouveau fichier", "Nom du fichier", "Nouveau texte.txt", do_mkfile, f); break;
     }
@@ -433,6 +483,9 @@ static void files_event(window_t *w, const event_t *e) {
     case K_CHAR:
         if ((e->mods & MOD_CTRL) && (e->ch == 'n' || e->ch == 'N')) dlg_input("Nouveau dossier", "Nom du dossier", "Nouveau dossier", do_mkdir, f);
         else if ((e->mods & MOD_CTRL) && (e->ch == 'd' || e->ch == 'D')) do_duplicate(w, f);
+        else if ((e->mods & MOD_CTRL) && (e->ch == 'c' || e->ch == 'C')) do_copy(f, false);
+        else if ((e->mods & MOD_CTRL) && (e->ch == 'x' || e->ch == 'X')) do_copy(f, true);
+        else if ((e->mods & MOD_CTRL) && (e->ch == 'v' || e->ch == 'V')) do_paste(w, f);
         return;
     default: return;
     }
@@ -442,6 +495,15 @@ static void files_event(window_t *w, const event_t *e) {
 
 static void files_tick(window_t *w, uint64_t now) {
     files_t *f = w->data;
+    if (f->job >= 0) {                                   /* copie terminée : dossier relu */
+        char out[256];
+        int r = plat_spawn_poll(f->job, out, sizeof out);
+        if (r != -1) {
+            f->job = -1;
+            wm_toast(r == 0 ? (f->job_cut ? "Déplacé." : "Collé.") : "La copie a échoué (place insuffisante ?).");
+            files_load(w, f);
+        }
+    }
     if (now < f->next_vols) return;
     f->next_vols = now + 2000;
     volume_t v[6];
@@ -472,5 +534,6 @@ void app_files_open(const char *path) {
     w->event = files_event;
     w->on_close = files_close;
     w->tick = files_tick;
+    f->job = -1;
     files_go(w, f, path ? path : plat_home());
 }

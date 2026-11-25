@@ -2,6 +2,13 @@
 
 Toutes les versions sont dans les [versions publiées](../../releases). Depuis la bêta 6, TitanOs se met à jour tout seul.
 
+## Bêta 31
+
+**Fichiers : copier, couper, coller**
+- Clic droit sur un fichier ou un dossier : **Copier**, **Couper**, **Coller** (aussi Ctrl+C, Ctrl+X, Ctrl+V). Clic droit dans le vide : Coller.
+- Marche entre deux fenêtres Fichiers, d'une clé USB vers le disque et inversement, dossiers compris. Un nom déjà pris devient « nom (2) ».
+- « Dupliquer » marche aussi sur les dossiers.
+
 ## Bêta 30
 
 **Câble Ethernet**
