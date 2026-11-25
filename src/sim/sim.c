@@ -58,7 +58,7 @@ int plat_listdir(const char *path, dirent_t **out) {
     return n;
 }
 int plat_readfile(const char *path, char **data, size_t *len) {
-    const char *t = "Bienvenue dans TitanOs (bêta 26) !\n\nCe Bloc-notes enregistre vos textes sur la clé USB.\n"
+    const char *t = "Bienvenue dans TitanOs (bêta 27) !\n\nCe Bloc-notes enregistre vos textes sur la clé USB.\n"
                     "Le système tourne sur le noyau Linux, mais tout ce que vous voyez est fait maison.\n";
     if (str_ends(path, ".cfg")) return -1;
     *len = strlen(t);
@@ -81,7 +81,7 @@ int plat_pty_read(int id, char *buf, int n) {
     if (pty_sent[id & 7]) return 0;
     pty_sent[id & 7] = true;
     const char *s =
-        "\x1b[1;35mTitanOs bêta 26\x1b[0m - noyau Linux 6.18.65 - BusyBox 1.37\r\n"
+        "\x1b[1;35mTitanOs bêta 27\x1b[0m - noyau Linux 6.18.65 - BusyBox 1.37\r\n"
         "Tapez \x1b[1maide\x1b[0m pour la liste des commandes.\r\n\r\n"
         "\x1b[1;32mtitan\x1b[0m@\x1b[36mtitanos\x1b[0m:\x1b[1;34m~\x1b[0m$ ls\r\n"
         "\x1b[1;34mDocuments\x1b[0m  \x1b[1;34mImages\x1b[0m  \x1b[1;34mMusique\x1b[0m  Bienvenue.txt  vacances.png\r\n"
@@ -173,14 +173,15 @@ void plat_diag(char *buf, int n) {
 void plat_battery(battery_t *b) { b->present = true; b->charging = false; b->ac = false; b->percent = 76; b->minutes = 154; }
 static const wifi_net_t nets[] = {
     { "Livebox-A3F2", 86, true, true, true }, { "Freebox-5G-Maison", 64, true, false, false },
-    { "SFR_WiFi_FON", 48, false, false, false }, { "iPhone de Léa", 41, true, false, false },
-    { "Bbox-7C1D9E", 22, true, false, false },
+    { "SFR_WiFi_FON", 48, false, false, false }, { "POCO F8 Ultra", 41, true, false, false, false, true },
+    { "eduroam", 30, true, false, false, true, false }, { "Bbox-7C1D9E", 22, true, false, false },
 };
 int  plat_wifi_status(char *ssid, int n, int *signal) { strlcpy(ssid, "Livebox-A3F2", (size_t)n); *signal = 86; return WIFI_CONNECTED; }
 void plat_wifi_scan(void) {}
 int  plat_wifi_list(wifi_net_t *l, int max) { int n = MIN(max, countof(nets)); memcpy(l, nets, sizeof(wifi_net_t) * (size_t)n); return n; }
 bool plat_wifi_connect(const char *ssid, const char *psk) { (void)ssid; (void)psk; return true; }
 void plat_wifi_forget(const char *ssid) { (void)ssid; }
+bool plat_wifi_connect_eap(const char *ssid, const char *id, const char *pw) { (void)ssid; (void)id; (void)pw; return true; }
 
 /* ---------------- interface pour tools/preview.py ---------------- */
 EXPORT void sim_init(int w, int h) {

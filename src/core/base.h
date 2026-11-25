@@ -25,8 +25,8 @@ typedef __builtin_va_list va_list;
 #define false 0
 #define NULL  ((void *)0)
 
-#define TITANOS_VERSION "Bêta 26"
-#define TITANOS_BUILD   26             /* numéro de version, comparé aux mises à jour publiées */
+#define TITANOS_VERSION "Bêta 27"
+#define TITANOS_BUILD   27             /* numéro de version, comparé aux mises à jour publiées */
 #define countof(a) ((int)(sizeof(a) / sizeof((a)[0])))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -209,12 +209,14 @@ bool  plat_other_titanos(char *desc, int n);                /* un autre TitanOs 
 bool  plat_update_other(void);                              /* lui donne la version de cette clé */
 
 /* Wi-Fi (wpa_supplicant) */
-typedef struct { char ssid[33]; int signal; bool secure, known, current; } wifi_net_t;
+/* enterprise : WPA2-Entreprise (identifiant + mot de passe) ; wpa3 : WPA3 seul (SAE) */
+typedef struct { char ssid[33]; int signal; bool secure, known, current, enterprise, wpa3; } wifi_net_t;
 enum { WIFI_NONE = -1, WIFI_OFF, WIFI_CONNECTING, WIFI_CONNECTED, WIFI_BLOCKED, WIFI_REFUSED };   /* BLOCKED : interrupteur sur OFF ; REFUSED : mot de passe refusé */
 int   plat_wifi_status(char *ssid, int n, int *signal);     /* WIFI_* ; signal 0-100 */
 void  plat_wifi_scan(void);
 int   plat_wifi_list(wifi_net_t *list, int max);
 bool  plat_wifi_connect(const char *ssid, const char *psk); /* psk NULL : réseau ouvert ou connu */
+bool  plat_wifi_connect_eap(const char *ssid, const char *identity, const char *password);   /* WPA2-Entreprise */
 void  plat_wifi_forget(const char *ssid);
 
 /* ---------------- bureau (appelé par la plateforme) ---------------- */

@@ -14,11 +14,12 @@ typedef struct {
     char job_if[16], result[160];
     uint64_t next_list, next_scan;
     char pending[33];                 /* réseau en attente du mot de passe */
+    char pending_id[128];             /* identifiant (WPA2-Entreprise) */
     char menu_ssid[33];               /* réseau visé par le menu (clic droit) */
 } net_t;
 
 enum { J_NONE, J_DHCP, J_PING };
-enum { H_NONE = -1, H_REFRESH = 1000, H_PING = 1001, H_WIRED = 2000 };
+enum { H_NONE = -1, H_REFRESH = 1000, H_PING = 1001, H_HIDDEN = 1002, H_WIRED = 2000 };
 
 static window_t *cur_net;
 
@@ -29,6 +30,7 @@ static rect_t list_rect(canvas_t *c, net_t *s) {
     return R(16, 66, c->w - 32, c->h - 66 - wired_h - 70);
 }
 static rect_t refresh_rect(canvas_t *c) { return R(c->w - 16 - 130, 16, 130, 36); }
+static rect_t hidden_rect(canvas_t *c) { return R(c->w - 16 - 130 - 10 - 160, 16, 160, 36); }
 static rect_t ping_rect(canvas_t *c) { return R(16, c->h - 54, 190, 38); }
 static rect_t wired_row(canvas_t *c, net_t *s, int k) {
     rect_t L = list_rect(c, s);
@@ -57,7 +59,7 @@ static void net_draw(window_t *w, canvas_t *c) {
     else if (s->wstate == WIFI_CONNECTED) snprintf(st, sizeof st, "Connecté à « %s »", s->wssid);
     else if (s->wstate == WIFI_CONNECTING) strlcpy(st, "Connexion en cours…", sizeof st);
     else if (s->wstate == WIFI_BLOCKED) strlcpy(st, "Radio coupée par l'interrupteur", sizeof st);
-    else if (s->wstate == WIFI_REFUSED) strlcpy(st, "Mot de passe refusé : clic droit sur le réseau, « Oublier », puis réessayez", sizeof st);
+    else if (s->wstate == WIFI_REFUSED) strlcpy(st, "Refusé (mot de passe ou identifiant) : clic droit sur le réseau, « Oublier », puis réessayez", sizeof st);
     else strlcpy(st, "Non connecté", sizeof st);
     for (int i = 0; i < s->nifs; i++)
         if (s->ifs[i].internet && strcmp(s->ifs[i].kind, "Wi-Fi")) {
@@ -65,7 +67,10 @@ static void net_draw(window_t *w, canvas_t *c) {
             snprintf(st + l, sizeof st - l, " · Internet passe par %s", !strcmp(s->ifs[i].kind, "Téléphone USB") ? "le téléphone" : "le câble");
         }
     text_draw(c, &font_small, 58, 36, st, s->wstate == WIFI_CONNECTED ? 0xFF86EFAC : C_MUTED);
-    if (s->wstate != WIFI_NONE) ui_button(c, refresh_rect(c), "Actualiser", BTN_NORMAL, s->hover == H_REFRESH);
+    if (s->wstate != WIFI_NONE) {
+        ui_button(c, refresh_rect(c), "Actualiser", BTN_NORMAL, s->hover == H_REFRESH);
+        ui_button(c, hidden_rect(c), "Réseau masqué…", BTN_NORMAL, s->hover == H_HIDDEN);
+    }
 
     rect_t L = list_rect(c, s);
     ui_panel(c, L, 16);
@@ -85,7 +90,10 @@ static void net_draw(window_t *w, canvas_t *c) {
         if (n->current) gfx_rrect(c, r.x, r.y, r.w, r.h, 12, (accent() & 0xFFFFFF) | 0x70000000);
         else if (i == s->hover) gfx_rrect(c, r.x, r.y, r.w, r.h, 12, 0x1EFFFFFF);
         draw_wifi(c, r.x + 24, r.y + 20, 22, level_of(n->signal), C_TEXT, 0x40FFFFFF);
-        text_fit(c, &font_bold, r.x + 50, r.y + 12, r.w - 230, n->ssid, C_TEXT);
+        text_fit(c, &font_bold, r.x + 50, r.y + 5, r.w - 230, n->ssid, C_TEXT);
+        const char *kind = n->enterprise ? "Identifiant et mot de passe (WPA2-Entreprise)" : n->wpa3 ? "WPA3"
+                         : n->secure ? "Mot de passe (WPA2)" : "Ouvert : une page d'identification peut s'ouvrir dans Chromium";
+        text_fit(c, &font_small, r.x + 50, r.y + 24, r.w - 230, kind, C_MUTED);
         const char *tag = n->current ? (s->wstate == WIFI_CONNECTED ? "Connecté" : "Connexion…") : n->known ? "Enregistré" : "";
         text_draw(c, &font_small, r.x + r.w - 130, r.y + 14, tag, n->current ? C_TEXT : C_MUTED);
         if (n->secure) draw_icon(c, ICON_LOCK, r.x + r.w - 34, r.y + 12, 18);
@@ -133,8 +141,54 @@ static void password_cb(const char *psk, void *ctx) {
     wm_invalidate(cur_net);
 }
 
+static void eap_password_cb(const char *pw, void *ctx) {
+    net_t *s = ctx;
+    if (!cur_net || !cur_net->used || cur_net->data != s) return;
+    if (!pw[0]) { dlg_message("Wi-Fi", "Le mot de passe est vide."); return; }
+    if (!plat_wifi_connect_eap(s->pending, s->pending_id, pw)) { wm_toast("Impossible de se connecter à ce réseau."); return; }
+    snprintf(s->result, sizeof s->result, "Connexion à « %s » avec l'identifiant %s…", s->pending, s->pending_id);
+    s->next_list = 0;
+    wm_invalidate(cur_net);
+}
+
+static void eap_identity_cb(const char *id, void *ctx) {
+    net_t *s = ctx;
+    if (!cur_net || !cur_net->used || cur_net->data != s) return;
+    if (!id[0]) { dlg_message("Wi-Fi", "L'identifiant est vide."); return; }
+    strlcpy(s->pending_id, id, sizeof s->pending_id);
+    char label[96];
+    snprintf(label, sizeof label, "Mot de passe de %s", id);
+    dlg_password("Connexion Wi-Fi", label, eap_password_cb, s);
+}
+
+/* réseau masqué : son nom, puis son mot de passe (vide s'il est ouvert) */
+static void hidden_password_cb(const char *pw, void *ctx) {
+    net_t *s = ctx;
+    if (!cur_net || !cur_net->used || cur_net->data != s) return;
+    if (pw[0] && strlen(pw) < 8) { dlg_message("Wi-Fi", "Le mot de passe d'un réseau Wi-Fi fait au moins 8 caractères."); return; }
+    connect_with(s->pending, pw[0] ? pw : NULL, s);
+    wm_invalidate(cur_net);
+}
+static void hidden_name_cb(const char *name, void *ctx) {
+    net_t *s = ctx;
+    if (!cur_net || !cur_net->used || cur_net->data != s || !name[0]) return;
+    strlcpy(s->pending, name, sizeof s->pending);
+    char label[96];
+    snprintf(label, sizeof label, "Mot de passe de « %s » (vide si le réseau est ouvert)", name);
+    dlg_password("Réseau masqué", label, hidden_password_cb, s);
+}
+
 static void choose(window_t *w, net_t *s, wifi_net_t *n) {
     if (n->current && s->wstate == WIFI_CONNECTED) return;
+    if (n->enterprise && !n->known) {
+        strlcpy(s->pending, n->ssid, sizeof s->pending);
+        cur_net = w;
+        char label[96];
+        snprintf(label, sizeof label, "Identifiant pour « %s » (souvent une adresse e-mail)", n->ssid);
+        dlg_input("Connexion Wi-Fi", label, "", eap_identity_cb, s);
+        return;
+    }
+    if (!n->secure && !n->known) wm_toast("Réseau ouvert : si une page d'identification est demandée, ouvrez Chromium.");
     if (n->secure && !n->known) {
         strlcpy(s->pending, n->ssid, sizeof s->pending);
         cur_net = w;
@@ -174,6 +228,7 @@ static void net_event(window_t *w, const event_t *e) {
         int h = H_NONE;
         if (rect_has(L, e->x, e->y)) { int i = s->scroll + (e->y - L.y - 4) / ROW_H; if (i >= 0 && i < s->nnets) h = i; }
         if (s->wstate != WIFI_NONE && rect_has(refresh_rect(c), e->x, e->y)) h = H_REFRESH;
+        if (s->wstate != WIFI_NONE && rect_has(hidden_rect(c), e->x, e->y)) h = H_HIDDEN;
         if (rect_has(ping_rect(c), e->x, e->y)) h = H_PING;
         for (int k = 0; k < wired_count(s); k++) if (rect_has(dhcp_rect(c, s, k), e->x, e->y)) h = H_WIRED + k;
         if (h != s->hover) { s->hover = h; wm_invalidate(w); }
@@ -193,6 +248,9 @@ static void net_event(window_t *w, const event_t *e) {
             static const char *items[] = { "Se connecter", "Oublier ce réseau" };
             wm_menu(cl.x + e->x, cl.y + e->y, items, s->nets[s->hover].known ? 2 : 1, ctx_cb, w);
         } else choose(w, s, &s->nets[s->hover]);
+    } else if (s->hover == H_HIDDEN) {
+        cur_net = w;
+        dlg_input("Réseau masqué", "Nom exact du réseau (SSID)", "", hidden_name_cb, s);
     } else if (s->hover == H_REFRESH) {
         plat_wifi_scan();
         s->next_list = plat_ms() + 2500;

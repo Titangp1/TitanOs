@@ -2,6 +2,20 @@
 
 Toutes les versions sont dans les [versions publiées](../../releases). Depuis la bêta 6, TitanOs se met à jour tout seul.
 
+## Bêta 27
+
+**Wi-Fi : tous les types de réseaux**
+- **Réseaux avec identifiant et mot de passe** (WPA2-Entreprise : eduroam, écoles, entreprises) : TitanOs demande l'identifiant, souvent une adresse e-mail, puis le mot de passe. Méthodes PEAP et TTLS avec MSCHAPv2. Avant, seul le mot de passe était demandé et la connexion échouait.
+- **WPA3** : les réseaux qui n'acceptent que WPA3 (SAE), comme le partage de connexion de beaucoup de téléphones récents, sont reconnus. TitanOs s'y connecte en WPA3, avec la protection des trames de gestion. Les réseaux WPA2 et WPA2/WPA3 restent en WPA2, comme avant.
+- Sous chaque réseau, son type : « Mot de passe (WPA2) », « WPA3 », « Identifiant et mot de passe », ou « Ouvert ».
+- **Réseaux ouverts** (FreeWifi, SFR WiFi FON...) : un message rappelle que leur page d'identification s'ouvre dans Chromium.
+- **Réseau masqué…** : nouveau bouton pour se connecter à un réseau qui ne diffuse pas son nom.
+- Si wpa_supplicant est occupé et refuse une recherche, TitanOs la demande directement au noyau.
+
+**Partage de connexion d'un téléphone**
+- **Par USB** : pris en charge depuis la bêta 25 (RNDIS et NCM pour Android, iPhone avec ipheth). Branchez le câble, puis activez « Partage de connexion via USB » sur le téléphone. Internet passe alors par le téléphone, avant le Wi-Fi.
+- **Par Wi-Fi** : si le point d'accès du téléphone n'apparaît pas, ou si la connexion échoue, réglez-le sur la bande **2,4 GHz** et la sécurité **WPA2-Personnel** (ou WPA2/WPA3). La carte Intel 6200 date de 2010 : elle n'entend pas certains canaux 5 GHz, et ne fait pas toujours WPA3.
+
 ## Bêta 26
 
 **Terminal sans droits d'administrateur, et sudo**

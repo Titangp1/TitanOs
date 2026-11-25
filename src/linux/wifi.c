@@ -252,6 +252,7 @@ static void wifi_start(void) {
     ok("SET filter_ssids 0");
     ok("SET autoscan exponential:3:60");
     ok("SET scan_cur_freq 0");
+    ok("SET sae_pwe 2");                                  /* WPA3 : les deux méthodes (téléphones récents) */
     if (path_exists("/usr/sbin/iw")) {                   /* économie d'énergie de la radio : coupée */
         int c = sys_fork();
         if (c == 0) {
@@ -374,7 +375,16 @@ static void w_scan(void) {
          strstr(st, "wpa_state=AUTHENTICATING") || strstr(st, "wpa_state=4WAY_HANDSHAKE") ||
          strstr(st, "wpa_state=GROUP_HANDSHAKE")))
         return;
-    ok("SCAN");
+    if (!ok("SCAN") && path_exists("/usr/sbin/iw") && iface[0]) {
+        int c = sys_fork();
+        if (c == 0) {
+            int nul = sys_open("/dev/null", O_RDWR, 0);
+            if (nul >= 0) { sys_dup2(nul, 0); sys_dup2(nul, 1); sys_dup2(nul, 2); }
+            char *argv[] = { "/usr/sbin/iw", "dev", iface, "scan", "trigger", NULL };
+            sys_execve(argv[0], argv, g_envp);
+            sys_exit(127);
+        }
+    }
 }
 
 /* Bornes connues du noyau (« iw dev wlan0 scan dump ») : toutes celles entendues par les
@@ -421,7 +431,7 @@ static int kernel_bss(wifi_net_t *list, int n, int max) {
     /* BSS xx:xx...  /  freq: 2412  /  signal: -67.00 dBm  /  SSID: nom  /  RSN, WPA, Privacy */
     char ssid[64] = "";
     int sig = -100, cnt = 0;
-    bool sec = false, in = false;
+    bool sec = false, in = false, ent = false, sae = false;
     char *l = out;
     for (;;) {
         char *e = l ? strchr(l, '\n') : NULL;
@@ -434,6 +444,8 @@ static int kernel_bss(wifi_net_t *list, int n, int max) {
                     memset(&list[n], 0, sizeof list[n]);
                     strlcpy(list[n].ssid, ssid, sizeof list[n].ssid);
                     list[n].secure = sec;
+                    list[n].enterprise = ent;
+                    list[n].wpa3 = sae;
                     list[n].signal = s;
                     n++;
                 } else if (k < n && s > list[k].signal) list[k].signal = s;
@@ -443,7 +455,7 @@ static int kernel_bss(wifi_net_t *list, int n, int max) {
             cnt++;
             ssid[0] = 0;
             sig = -100;
-            sec = false;
+            sec = ent = sae = false;
         } else if (in) {
             const char *t = l;
             while (*t == '\t' || *t == ' ') t++;
@@ -455,6 +467,14 @@ static int kernel_bss(wifi_net_t *list, int n, int max) {
                 raw[len] = 0;
                 unescape(raw, ssid, sizeof ssid);
             } else if (str_starts(t, "signal: ")) sig = atoi(t + 8);
+            else if (str_starts(t, "* Authentication suites:")) {
+                char *nl2 = e ? e : (char *)t + strlen(t);
+                char save = *nl2;
+                *nl2 = 0;
+                if (strstr(t, "802.1X")) ent = true;
+                if (strstr(t, "SAE") && !strstr(t, "PSK")) sae = true;
+                *nl2 = save;
+            }
             else if (str_starts(t, "RSN:") || str_starts(t, "WPA:") || (str_starts(t, "capability:") && strstr(t, "Privacy"))) {
                 char *nl2 = e ? e : (char *)t + strlen(t);
                 char save = *nl2;
@@ -516,6 +536,8 @@ static int w_list(wifi_net_t *list, int max) {
                 memset(&list[n], 0, sizeof list[n]);
                 strlcpy(list[n].ssid, ssid, sizeof list[n].ssid);
                 list[n].secure = strstr(flags, "WPA") || strstr(flags, "RSN") || strstr(flags, "WEP") || strstr(flags, "SAE");
+                list[n].enterprise = strstr(flags, "EAP") != NULL;
+                list[n].wpa3 = strstr(flags, "SAE") && !strstr(flags, "PSK");
                 list[n].current = state != WIFI_OFF && !strcmp(ssid, cur);
                 n++;
             }
@@ -543,6 +565,7 @@ static int w_list(wifi_net_t *list, int max) {
     return n;
 }
 
+static bool wpa3_only(const char *ssid);
 static bool w_connect(const char *ssid, const char *psk) {
     if (ctrl < 0) return false;
     char cmd[256], hex[80];
@@ -563,6 +586,18 @@ static bool w_connect(const char *ssid, const char *psk) {
     if (psk) {
         snprintf(cmd, sizeof cmd, "SET_NETWORK %d psk \"%s\"", id, psk);
         if (!ok(cmd)) return false;
+        /* WPA3 seul (partage de connexion des téléphones récents) : SAE, avec protection des
+         * trames de gestion ; sinon WPA2, comme avant */
+        if (wpa3_only(ssid)) {
+            snprintf(cmd, sizeof cmd, "SET_NETWORK %d key_mgmt SAE", id);
+            ok(cmd);
+            snprintf(cmd, sizeof cmd, "SET_NETWORK %d ieee80211w 2", id);
+            ok(cmd);
+            klog("Wi-Fi : « %s » est en WPA3 seul (SAE)", ssid);
+        } else {
+            snprintf(cmd, sizeof cmd, "SET_NETWORK %d key_mgmt WPA-PSK", id);
+            ok(cmd);
+        }
     } else {
         snprintf(cmd, sizeof cmd, "SET_NETWORK %d key_mgmt NONE", id);
         ok(cmd);
@@ -576,6 +611,67 @@ static bool w_connect(const char *ssid, const char *psk) {
     sys_sync();
     return r;
 }
+
+/* WPA2-Entreprise (802.1X) : identifiant et mot de passe, méthodes PEAP ou TTLS avec
+ * MSCHAPv2 (eduroam, réseaux d'école ou d'entreprise) */
+static bool w_connect_eap(const char *ssid, const char *identity, const char *password) {
+    if (ctrl < 0) return false;
+    char cmd[400], hex[80];
+    int id = net_id(ssid);
+    if (id < 0) {
+        char r[32];
+        if (request("ADD_NETWORK", r, sizeof r) <= 0 || r[0] < '0' || r[0] > '9') return false;
+        id = atoi(r);
+    }
+    int k = 0;
+    for (const uint8_t *p = (const uint8_t *)ssid; *p && k < 70; p++) k += snprintf(hex + k, sizeof hex - (size_t)k, "%02x", *p);
+    snprintf(cmd, sizeof cmd, "SET_NETWORK %d ssid %s", id, hex);
+    if (!ok(cmd)) return false;
+    static const char *const set[] = { "key_mgmt WPA-EAP", "eap PEAP TTLS", "phase2 \"auth=MSCHAPV2\"", "scan_ssid 1" };
+    for (int i = 0; i < countof(set); i++) {
+        snprintf(cmd, sizeof cmd, "SET_NETWORK %d %s", id, set[i]);
+        if (!ok(cmd) && i < 2) return false;
+    }
+    snprintf(cmd, sizeof cmd, "SET_NETWORK %d identity \"%s\"", id, identity);
+    if (!ok(cmd)) return false;
+    snprintf(cmd, sizeof cmd, "SET_NETWORK %d password \"%s\"", id, password);
+    bool good = ok(cmd);
+    memset(cmd, 0, sizeof cmd);
+    if (!good) return false;
+    snprintf(cmd, sizeof cmd, "SELECT_NETWORK %d", id);
+    bool r = ok(cmd);
+    ok("SAVE_CONFIG");
+    klog("Wi-Fi : connexion à « %s » (identifiant) %s", ssid, r ? "demandée" : "refusée");
+    sys_sync();
+    return r;
+}
+
+/* le réseau n'accepte-t-il que WPA3 (SAE, sans PSK) ? d'après les résultats de recherche */
+static bool wpa3_only(const char *ssid) {
+    static char buf[16384];
+    if (request("SCAN_RESULTS", buf, sizeof buf) <= 0) return false;
+    bool sae = false, psk = false;
+    for (char *l = strchr(buf, '\n'); l && l[1]; l = strchr(l + 1, '\n')) {
+        char line[300];
+        char *e = strchr(l + 1, '\n');
+        int len = e ? (int)(e - l - 1) : (int)strlen(l + 1);
+        if (len > (int)sizeof line - 1) len = sizeof line - 1;
+        memcpy(line, l + 1, (size_t)len);
+        line[len] = 0;
+        char *flags = field(line, 3), *name = field(line, 4);
+        if (!flags || !name) continue;
+        char *tab = strchr(flags, '\t');
+        if (tab) *tab = 0;
+        char nm[64];
+        unescape(name, nm, sizeof nm);
+        if (strcmp(nm, ssid)) continue;
+        if (strstr(flags, "SAE")) sae = true;
+        if (strstr(flags, "PSK")) psk = true;
+    }
+    return sae && !psk;
+}
+
+static void wipe_mem(void *p, size_t n) { volatile char *v = p; while (n--) *v++ = 0; }   /* mots de passe effacés */
 
 static void w_forget(const char *ssid) {
     /* toutes les entrées de ce nom (un réseau peut avoir été ajouté plusieurs fois) */
@@ -601,8 +697,8 @@ typedef struct {
     char wssid[33];
     wifi_net_t nets[SNAP_NETS];
 } snap_t;                                     /* < 4096 octets : écrit d'un seul bloc dans le tube */
-typedef struct { int op; char ssid[33]; char psk[72]; } wcmd_t;
-enum { OP_SCAN = 1, OP_CONNECT, OP_FORGET };
+typedef struct { int op; char ssid[33]; char psk[128]; char id[128]; } wcmd_t;
+enum { OP_SCAN = 1, OP_CONNECT, OP_FORGET, OP_CONNECT_EAP };
 
 static int snap_in = -1, cmd_out = -1;
 static snap_t snap;
@@ -636,6 +732,8 @@ static void helper_main(int out, int in) {
                 if (c.op == OP_SCAN) w_scan();
                 else if (c.op == OP_CONNECT) w_connect(c.ssid, c.psk[0] ? c.psk : NULL);
                 else if (c.op == OP_FORGET) w_forget(c.ssid);
+                else if (c.op == OP_CONNECT_EAP) w_connect_eap(c.ssid, c.id, c.psk);
+                wipe_mem(&c, sizeof c);
                 next = plat_ms() + 600;                 /* nouvel état peu après */
             }
             continue;
@@ -720,15 +818,17 @@ static void hw_poll(void) {
     while (sys_read(snap_in, &s, sizeof s) == sizeof s) { snap = s; have_snap = true; }
 }
 
-static void send_cmd(int op, const char *ssid, const char *psk) {
+static void send_cmd_id(int op, const char *ssid, const char *psk, const char *id) {
     if (cmd_out < 0) return;
     wcmd_t c;
     memset(&c, 0, sizeof c);
+    if (id) strlcpy(c.id, id, sizeof c.id);
     c.op = op;
     if (ssid) strlcpy(c.ssid, ssid, sizeof c.ssid);
     if (psk) strlcpy(c.psk, psk, sizeof c.psk);
     sys_write(cmd_out, &c, sizeof c);
 }
+static void send_cmd(int op, const char *ssid, const char *psk) { send_cmd_id(op, ssid, psk, NULL); }
 
 /* ---- interface pour le bureau : réponses immédiates, d'après le dernier état reçu ---- */
 int plat_wifi_status(char *ssid, int n, int *signal) {
@@ -749,6 +849,12 @@ void plat_wifi_scan(void) { send_cmd(OP_SCAN, NULL, NULL); }
 bool plat_wifi_connect(const char *ssid, const char *psk) {
     if (!have_snap || snap.wstate == WIFI_NONE) return false;
     send_cmd(OP_CONNECT, ssid, psk);
+    return true;
+}
+
+bool plat_wifi_connect_eap(const char *ssid, const char *identity, const char *password) {
+    if (!have_snap || snap.wstate == WIFI_NONE) return false;
+    send_cmd_id(OP_CONNECT_EAP, ssid, password, identity);
     return true;
 }
 void plat_wifi_forget(const char *ssid) { send_cmd(OP_FORGET, ssid, NULL); }
