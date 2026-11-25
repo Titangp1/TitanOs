@@ -3,8 +3,12 @@
 
 static const char *const names[APP_COUNT] = {
     "Fichiers", "Terminal", "Bloc-notes", "Calculatrice", "Paramètres", "Système", "Réseau", "Snake", "À propos", "Mises à jour", "Chromium",
+    "Logithèque",
 };
-const char *app_name(int icon) { return icon >= 0 && icon < APP_COUNT ? names[icon] : "Fenêtre"; }
+const char *app_name(int icon) {
+    if (icon >= STORE_BASE && icon < STORE_BASE + STORE_MAX) return store_name(icon - STORE_BASE);
+    return icon >= 0 && icon < APP_COUNT ? names[icon] : "Fenêtre";
+}
 
 void app_open(int icon) {
     switch (icon) {
@@ -19,6 +23,8 @@ void app_open(int icon) {
     case ICON_ABOUT:    app_about_open(); break;
     case ICON_UPDATE:   app_update_open(); break;
     case ICON_BROWSER:  app_browser_open(); break;
+    case ICON_STORE:    app_store_open(); break;
+    default: if (icon >= STORE_BASE && icon < STORE_BASE + STORE_MAX) store_launch(icon - STORE_BASE); break;
     }
 }
 

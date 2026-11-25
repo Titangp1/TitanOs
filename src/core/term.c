@@ -510,6 +510,19 @@ void app_terminal_open(void) {
     w->event = term_event;
     w->tick = term_tick;
     w->on_close = term_close;
+    w->cursor = CURSOR_TEXT;
     term_resize(t, (w->surf.w - 2 * PAD) / CW, (w->surf.h - PAD) / CH);
     term_start(t);
+}
+
+/* Terminal qui lance une commande (Python, Node.js...) : elle est tapée pour l'utilisateur */
+void app_terminal_run(const char *cmd) {
+    app_terminal_open();
+    window_t *w = wm_focused();
+    if (!w || w->icon != ICON_TERMINAL || !cmd) return;
+    term_t *t = w->data;
+    if (t && t->pty >= 0) {
+        plat_pty_write(t->pty, cmd, (int)strlen(cmd));
+        plat_pty_write(t->pty, "\n", 1);
+    }
 }

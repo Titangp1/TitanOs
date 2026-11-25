@@ -333,5 +333,6 @@ void app_notes_open(const char *path) {
     w->event = notes_event;
     w->on_close = notes_close;
     w->can_close = notes_can_close;
+    w->cursor = CURSOR_TEXT;
     if (path) load(w, n, path);
 }

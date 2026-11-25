@@ -2,6 +2,44 @@
 
 Toutes les versions sont dans les [versions publiées](../../releases). Depuis la bêta 6, TitanOs se met à jour tout seul.
 
+## Bêta 24
+
+**Logithèque : installer des applications en un clic**
+- Nouvelle application **Logithèque**, dans le menu Démarrer et le dock : **LibreOffice** (texte, tableur, présentations), **VS Code**, **Discord**, **GIMP**, **Python 3** et **Node.js**.
+- LibreOffice et GIMP viennent d'Alpine. VS Code et Discord viennent de Flathub, par Flatpak. Python et Node.js s'ouvrent dans le Terminal.
+- Une fois installées, les applications apparaissent dans le menu Démarrer avec leur propre icône. On peut les mettre sur le bureau, et les désinstaller depuis la Logithèque.
+- Les applications graphiques ont chacune leur fenêtre TitanOs (un serveur X en mémoire par application). Leurs dialogues (Enregistrer sous…) sont centrés, leurs menus restent à leur place.
+- Le bouton × demande d'abord à l'application de se fermer : elle peut proposer d'enregistrer. Un second clic force la fermeture.
+- Les installations passent par une file : une à la fois, dans l'ordre.
+
+**Chromium**
+- **Téléchargements** : ils vont dans le dossier *Téléchargements*, visible dans Fichiers. Ils n'arrivent plus dans un dossier caché.
+- **Son (YouTube…)** : la bibliothèque ALSA des applications est réglée sur la bonne sortie (le haut-parleur, pas le HDMI de la carte graphique), avec un mélangeur logiciel. Les sons de TitanOs libèrent la sortie dès qu'ils sont finis.
+- Le pointeur prend la forme demandée par la page : main sur un lien, barre de texte dans un champ.
+- Cache limité à 256 Mo.
+
+**Pointeur**
+- Nouveau pointeur, comme sur un Mac : flèche noire bordée de blanc, avec une ombre douce. Barre en I sur le texte (Terminal, Bloc-notes), double flèche dans le coin de redimensionnement, cercle qui tourne pendant qu'une application démarre.
+- Il est affiché par la carte graphique (plan « curseur ») : il suit la souris tout de suite, même si l'image est en train d'être dessinée.
+
+**Fluidité**
+- Le mini-figement toutes les 1 à 2 secondes : la batterie était lue par l'ACPI toutes les 2 s. Sur certains portables, dont les VAIO, chaque lecture peut suspendre brièvement tout le processeur. Elle est maintenant lue toutes les 15 s, et tout de suite quand le noyau signale un changement (chargeur branché ou débranché).
+- Clés USB, câble réseau et périphériques d'entrée sont signalés par le noyau, au lieu d'être recherchés plusieurs fois par seconde.
+- Le journal compte les images lentes et les « retards du système » (processus réveillé en retard). Si un figement persiste, le journal dira d'où il vient.
+
+**Barres de progression fluides**
+- Les barres glissent vers la valeur réelle au lieu de sauter d'un état à l'autre, et avancent doucement entre deux nouvelles. Un reflet les parcourt. Si la durée est inconnue, un segment va et vient.
+- Le téléchargement d'une mise à jour affiche un vrai pourcentage (« 12 Mo sur 33 »).
+
+**Démarrage**
+- Le chargeur BIOS accepte aussi les modes 16 et 24 bits. Beaucoup de cartes NVIDIA ne proposent la résolution de l'écran qu'en 16 ou 24 bits. TitanOs démarre alors directement en 1920×1080, au lieu d'un 1280×1024 étiré et flou. L'image est tramée : le dégradé reste lisse.
+- La liste des modes proposés par la carte est notée dans le journal (`titanos.vbe=`). Si l'écran de démarrage est encore flou, elle montrera ce que le BIOS du PC permet.
+
+**Place libérée**
+- Après une mise à jour, le paquet téléchargé et ses fichiers (environ 100 Mo, en mémoire vive) sont effacés tout de suite.
+- Au démarrage, TitanOs efface les restes de téléchargements et les rapports de plantage de Chromium.
+- Les fichiers du système sont réécrits à leur place à chaque mise à jour : aucune ancienne version ne s'accumule sur le disque.
+
 ## Bêta 23
 
 **Plus de types de fichiers**

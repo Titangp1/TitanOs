@@ -252,7 +252,7 @@ void settings_load(void) {
                         int a = atoi(item + 2), col = -1, row = -1;
                         char *c1 = strchr(item + 2, ',');
                         if (c1) { col = atoi(c1 + 1); char *c2 = strchr(c1 + 1, ','); if (c2) row = atoi(c2 + 1); }
-                        if (a >= 0 && a < APP_COUNT) { d->app = (signed char)a; d->col = (signed char)col; d->row = (signed char)row; g_set.ndesk++; }
+                        if ((a >= 0 && a < APP_COUNT) || (a >= STORE_BASE && a < STORE_BASE + STORE_MAX)) { d->app = (signed char)a; d->col = (signed char)col; d->row = (signed char)row; g_set.ndesk++; }
                     } else if (item[0] == 'f' && item[1] == ',') {
                         int col = atoi(item + 2), row = -1;
                         char *c1 = strchr(item + 2, ','), *c2 = c1 ? strchr(c1 + 1, ',') : NULL;

@@ -7,6 +7,9 @@
 #include "font.h"
 
 typedef struct { uint32_t *px; int w, h, stride; rect_t clip; } canvas_t;
+/* (plateforme) forme du pointeur d'une application X11, si elle a changé ; pointeur matériel */
+bool plat_xapp_cursor(int x, canvas_t *img, int *hx, int *hy);
+bool plat_cursor_image(const canvas_t *img, int hx, int hy);   /* false : pointeur dessiné par TitanOs */
 
 #define OPAQUE(c)   (0xFF000000u | (uint32_t)(c))
 #define ALPHA(c, a) (((uint32_t)(a) << 24) | ((uint32_t)(c) & 0xFFFFFFu))

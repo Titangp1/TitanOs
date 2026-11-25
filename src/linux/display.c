@@ -223,8 +223,93 @@ static bool fb_open(void) {
     return true;
 }
 
+/* ---------------- pointeur matériel ----------------
+ * La carte affiche le pointeur par-dessus l'image (plan « curseur », 64 x 64 ARGB) : le
+ * déplacer ne coûte qu'un appel, sans rien redessiner, au rythme de la souris. */
+static struct { uint32_t handle; uint32_t *map; size_t size; int pitch, hx, hy; bool on; } CUR;
+
+static void cursor_free(void) {
+    if (CUR.map) sys_munmap(CUR.map, CUR.size);
+    if (CUR.handle && D.fd >= 0) { struct drm_mode_destroy_dumb dd = { CUR.handle }; sys_ioctl(D.fd, DRM_IOCTL_MODE_DESTROY_DUMB, &dd); }
+    memset(&CUR, 0, sizeof CUR);
+}
+
+bool display_cursor_image(const uint32_t *px, int stride, int w, int h, int hx, int hy) {
+    if (D.fd < 0 || !D.drm || !D.crtc || !strcmp(D.driver, "simpledrm")) return false;
+    if (!px) {                                          /* caché */
+        struct drm_mode_cursor c = { 0 };
+        c.flags = DRM_MODE_CURSOR_BO;
+        c.crtc_id = D.crtc;
+        long r = sys_ioctl(D.fd, DRM_IOCTL_MODE_CURSOR, &c);
+        CUR.on = false;
+        return r == 0;
+    }
+    if (w > 64 || h > 64) return false;
+    if (!CUR.handle) {
+        struct drm_mode_create_dumb cd = { 0 };
+        cd.width = 64;
+        cd.height = 64;
+        cd.bpp = 32;
+        if (sys_ioctl(D.fd, DRM_IOCTL_MODE_CREATE_DUMB, &cd) < 0) return false;
+        struct drm_mode_map_dumb md = { 0 };
+        md.handle = cd.handle;
+        void *m = (void *)-1;
+        if (sys_ioctl(D.fd, DRM_IOCTL_MODE_MAP_DUMB, &md) == 0)
+            m = sys_mmap(NULL, (size_t)cd.size, PROT_READ | PROT_WRITE, MAP_SHARED, D.fd, (long)md.offset);
+        if ((long)m < 0 && (long)m > -4096) m = (void *)-1;
+        CUR.handle = cd.handle;
+        if (m == (void *)-1) { cursor_free(); return false; }
+        CUR.map = m;
+        CUR.size = (size_t)cd.size;
+        CUR.pitch = (int)(cd.pitch / 4);
+    }
+    memset(CUR.map, 0, CUR.size);
+    for (int j = 0; j < h; j++) memcpy(CUR.map + (size_t)j * CUR.pitch, px + (size_t)j * stride, (size_t)w * 4);
+    struct drm_mode_cursor2 c2 = { 0 };
+    c2.flags = DRM_MODE_CURSOR_BO;
+    c2.crtc_id = D.crtc;
+    c2.width = 64;
+    c2.height = 64;
+    c2.handle = CUR.handle;
+    c2.hot_x = hx;
+    c2.hot_y = hy;
+    long r = sys_ioctl(D.fd, DRM_IOCTL_MODE_CURSOR2, &c2);
+    if (r < 0) {
+        struct drm_mode_cursor c = { 0 };
+        c.flags = DRM_MODE_CURSOR_BO;
+        c.crtc_id = D.crtc;
+        c.width = 64;
+        c.height = 64;
+        c.handle = CUR.handle;
+        r = sys_ioctl(D.fd, DRM_IOCTL_MODE_CURSOR, &c);
+    }
+    if (r < 0) {
+        static bool told;
+        if (!told) { told = true; klog("écran : pas de pointeur matériel (%ld), pointeur dessiné", r); }
+        cursor_free();
+        return false;
+    }
+    static bool said;
+    if (!said) { said = true; klog("écran : pointeur matériel actif"); }
+    CUR.hx = hx;
+    CUR.hy = hy;
+    CUR.on = true;
+    return true;
+}
+
+void display_cursor_move(int x, int y) {
+    if (!CUR.on || D.fd < 0) return;
+    struct drm_mode_cursor c = { 0 };
+    c.flags = DRM_MODE_CURSOR_MOVE;
+    c.crtc_id = D.crtc;
+    c.x = x - CUR.hx;
+    c.y = y - CUR.hy;
+    sys_ioctl(D.fd, DRM_IOCTL_MODE_CURSOR, &c);
+}
+
 void display_close(void) {
     if (D.fd < 0) return;
+    cursor_free();
     if (D.flip) {
         for (int i = 0; i < 2; i++) {
             sys_munmap(D.maps[i], D.size);

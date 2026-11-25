@@ -32,16 +32,25 @@ mu.reg_write(X.UC_X86_REG_ESP, 0x7000)
 text, unknown, vbe_set = [], [], [None]
 # écran simulé : modes VBE proposés et résolution native (EDID).
 # TESTBOOT_VAIO=1 imite la carte NVIDIA du VAIO : pas de mode 1920x1080, mais un 1366x768.
-if os.environ.get("TESTBOOT_VAIO") == "2":       # le vrai VAIO : rien en 16:9, 1280x1024 étiré par l'écran
+# TESTBOOT_VAIO=3 / 4 : 1920x1080 proposé seulement en 16 / 24 bits (cas fréquent des cartes NVIDIA).
+VAIO = os.environ.get("TESTBOOT_VAIO")
+if VAIO == "2":                                  # rien en 16:9, 1280x1024 étiré par l'écran
     MODES = {0x118: (1024, 768), 0x11B: (1280, 1024)}
     EXPECT = (1280, 1024)
-elif os.environ.get("TESTBOOT_VAIO"):
+elif VAIO in ("3", "4"):
+    bits = 16 if VAIO == "3" else 24
+    MODES = {0x118: (1024, 768), 0x11B: (1280, 1024), 0x117: (1024, 768, 16), 0x11A: (1280, 1024, 16), 0x17F: (1920, 1080, bits)}
+    EXPECT = (1920, 1080, bits)
+elif VAIO:
     MODES = {0x118: (1024, 768), 0x11B: (1280, 1024), 0x160: (1366, 768), 0x161: (1600, 1200)}
     EXPECT = (1366, 768)
 else:
     MODES = {0x118: (1024, 768), 0x144: (1600, 900), 0x145: (1920, 1080), 0x146: (2560, 1440)}
     EXPECT = (1920, 1080)
 NATIVE = (0, 0) if os.environ.get("TESTBOOT_NOEDID") else (1920, 1080)
+EXPECT = (*EXPECT[:2], EXPECT[2] if len(EXPECT) > 2 else 32)
+BPP = EXPECT[2]
+BYTES = (BPP + 7) // 8
 E820 = [(0, 0x9FC00, 1), (0x9FC00, 0x400, 2), (0xF0000, 0x10000, 2), (0x100000, 0x7FE00000, 1), (0xFEC00000, 0x1400000, 2)]
 
 
@@ -73,14 +82,16 @@ def bios(uc, intno, _):
             uc.mem_write(0x6000, struct.pack(f"<{len(MODES) + 1}H", *MODES, 0xFFFF))
             setreg("AX", 0x4F)
         elif ax == 0x4F01:                           # informations sur un mode
-            w, h = MODES.get(reg("CX"), (0, 0))
+            m = MODES.get(reg("CX"), (0, 0))
+            w, h, b = m[0], m[1], m[2] if len(m) > 2 else 32
+            by = (b + 7) // 8
             mi = bytearray(256)
             struct.pack_into("<H", mi, 0, 0x9B)
-            struct.pack_into("<HHH", mi, 16, w * 4, w, h)
-            mi[25], mi[27] = 32, 6
-            mi[31:39] = bytes([8, 16, 8, 8, 8, 0, 8, 24])
+            struct.pack_into("<HHH", mi, 16, w * by, w, h)
+            mi[25], mi[27] = b, 6
+            mi[31:39] = bytes([5, 11, 6, 5, 5, 0, 0, 0]) if b == 16 else bytes([8, 16, 8, 8, 8, 0, 8 if b == 32 else 0, 24 if b == 32 else 0])
             struct.pack_into("<I", mi, 40, 0xE0000000)
-            struct.pack_into("<H", mi, 50, w * 4)
+            struct.pack_into("<H", mi, 50, w * by)
             uc.mem_write(es_di, bytes(mi))
             setreg("AX", 0x4F)
         elif ax == 0x4F15 and (reg("BX") & 0xFF) == 1 and NATIVE[0]:  # EDID de l'écran
@@ -161,15 +172,24 @@ checks = {
     f"initramfs copié à {rd_addr >> 20} Mo": rd_size == len(initrd) and bytes(mu.mem_read(rd_addr, rd_size)) == initrd,
     "en-tête du noyau (HdrS)": zp[0x202:0x206] == b"HdrS" and zp[0x210] == 0xFF,
     f"carte mémoire E820 ({zp[0x1E8]} zones)": zp[0x1E8] == len(E820),
-    f"écran VBE décrit ({EXPECT[0]}x{EXPECT[1]}x32)": zp[0x0F] == 0x23 and struct.unpack_from("<HHH", zp, 0x12) == (*EXPECT, 32),
+    f"écran VBE décrit ({EXPECT[0]}x{EXPECT[1]}x{BPP})": zp[0x0F] == 0x23 and struct.unpack_from("<HHH", zp, 0x12) == EXPECT,
+    "liste des modes dans la ligne de commande": "titanos.vbe=" in cmd,
     f"ligne de commande : {cmd}": "quiet" in cmd and f"titanos.disk={struct.unpack_from('<I', disk, 440)[0]:08x}" in cmd,
 }
 # ce que le chargeur a dessiné à l'écran : le logo au centre, le fond en dégradé
-FBW, FBH = EXPECT
+FBW, FBH = EXPECT[:2]
+
+
+def decode(raw):
+    v = int.from_bytes(raw, "little")
+    if BPP == 16:
+        r, g, b = v >> 11 & 31, v >> 5 & 63, v & 31
+        return (r * 255 // 31) << 16 | (g * 255 // 63) << 8 | (b * 255 // 31)
+    return v & 0xFFFFFF
 
 
 def pixel(x, y):
-    return struct.unpack_from("<I", bytes(mu.mem_read(0xE0000000 + (y * FBW + x) * 4, 4)))[0] & 0xFFFFFF
+    return decode(bytes(mu.mem_read(0xE0000000 + (y * FBW + x) * BYTES, BYTES)))
 
 
 def lum(c):
@@ -180,9 +200,14 @@ checks["écran de démarrage dessiné (logo au centre)"] = lum(pixel(FBW // 2 + 
 checks["fond en dégradé (haut plus sombre que le bas)"] = lum(pixel(10, 10)) < lum(pixel(10, FBH - 10))
 if len(sys.argv) > 2:              # capture de l'écran dessiné par le chargeur
     import zlib
-    raw = bytes(mu.mem_read(0xE0000000, FBW * FBH * 4))
+    raw = bytes(mu.mem_read(0xE0000000, FBW * FBH * BYTES))
     rgb = bytearray(FBW * FBH * 3)
-    rgb[0::3], rgb[1::3], rgb[2::3] = raw[2::4], raw[1::4], raw[0::4]
+    if BPP == 16:
+        for i in range(FBW * FBH):
+            c = decode(raw[i * 2:i * 2 + 2])
+            rgb[i * 3:i * 3 + 3] = bytes([c >> 16 & 255, c >> 8 & 255, c & 255])
+    else:
+        rgb[0::3], rgb[1::3], rgb[2::3] = raw[2::BYTES], raw[1::BYTES], raw[0::BYTES]
     rows = b"".join(b"\x00" + bytes(rgb[y * FBW * 3:(y + 1) * FBW * 3]) for y in range(FBH))
 
     def chunk(t, d):

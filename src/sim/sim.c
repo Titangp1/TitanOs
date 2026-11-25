@@ -58,7 +58,7 @@ int plat_listdir(const char *path, dirent_t **out) {
     return n;
 }
 int plat_readfile(const char *path, char **data, size_t *len) {
-    const char *t = "Bienvenue dans TitanOs (bêta 23) !\n\nCe Bloc-notes enregistre vos textes sur la clé USB.\n"
+    const char *t = "Bienvenue dans TitanOs (bêta 24) !\n\nCe Bloc-notes enregistre vos textes sur la clé USB.\n"
                     "Le système tourne sur le noyau Linux, mais tout ce que vous voyez est fait maison.\n";
     if (str_ends(path, ".cfg")) return -1;
     *len = strlen(t);
@@ -81,7 +81,7 @@ int plat_pty_read(int id, char *buf, int n) {
     if (pty_sent[id & 7]) return 0;
     pty_sent[id & 7] = true;
     const char *s =
-        "\x1b[1;35mTitanOs bêta 23\x1b[0m - noyau Linux 6.18.65 - BusyBox 1.37\r\n"
+        "\x1b[1;35mTitanOs bêta 24\x1b[0m - noyau Linux 6.18.65 - BusyBox 1.37\r\n"
         "Tapez \x1b[1maide\x1b[0m pour la liste des commandes.\r\n\r\n"
         "\x1b[1;32mtitan\x1b[0m@\x1b[36mtitanos\x1b[0m:\x1b[1;34m~\x1b[0m$ ls\r\n"
         "\x1b[1;34mDocuments\x1b[0m  \x1b[1;34mImages\x1b[0m  \x1b[1;34mMusique\x1b[0m  Bienvenue.txt  vacances.png\r\n"
@@ -270,3 +270,24 @@ bool plat_other_titanos(char *desc, int n) { strlcpy(desc, "ST9500325AS (sda)", 
 bool plat_update_other(void) { return true; }
 void plat_browser_resize(int w, int h) { (void)w; (void)h; }
 void plat_browser_open_url(const char *url) { (void)url; }
+
+/* pointeur dessiné, pas d'installation ni d'application X dans l'aperçu */
+bool plat_cursor_image(const canvas_t *img, int hx, int hy) { (void)img; (void)hx; (void)hy; return false; }
+void plat_cursor_move(int x, int y) { (void)x; (void)y; }
+EXPORT int sim_install_state = INS_NONE, sim_install_pc = -1;
+bool plat_app_install(const char *id, const char *script) { (void)id; (void)script; return false; }
+int plat_app_state(const char *id, char *msg, int n, int *percent) {
+    (void)id;
+    if (msg) strlcpy(msg, sim_install_state == INS_RUNNING ? "Téléchargement et installation… élément 2 sur 3" : "", (size_t)n);
+    if (percent) *percent = sim_install_pc;
+    return sim_install_state;
+}
+int  plat_xapp_start(const char *cmd, int w, int h) { (void)cmd; (void)w; (void)h; return -1; }
+bool plat_xapp_frame(int x, uint32_t *dst, int stride, int w, int h) { (void)x; (void)dst; (void)stride; (void)w; (void)h; return false; }
+bool plat_xapp_running(int x) { (void)x; return false; }
+void plat_xapp_input(int x, int type, int detail, int px, int py) { (void)x; (void)type; (void)detail; (void)px; (void)py; }
+void plat_xapp_resize(int x, int w, int h) { (void)x; (void)w; (void)h; }
+bool plat_xapp_close(int x) { (void)x; return false; }
+void plat_xapp_stop(int x) { (void)x; }
+bool plat_xapp_cursor(int x, canvas_t *img, int *hx, int *hy) { (void)x; (void)img; (void)hx; (void)hy; return false; }
+void plat_xapp_manage(int x) { (void)x; }

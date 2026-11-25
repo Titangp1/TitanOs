@@ -15,6 +15,8 @@ typedef struct {
     char other_desc[96];
     int nfiles;                     /* paquets titanos-maj.tar.gz trouvés sur des clés */
     char files[2][160];
+    ui_progress_t pu, pi;           /* barres : mise à jour, installation sur un disque */
+    bool anim;
 } upd_t;
 
 static rect_t other_rect(canvas_t *c) { return R(c->w - 16 - 240, 196, 240, 38); }
@@ -34,13 +36,9 @@ static void fmt_bytes(char *b, size_t n, uint64_t v) {
     else snprintf(b, n, "%d Go", (int)(v / 1000000000ull));
 }
 
-static void progress_bar(canvas_t *c, rect_t r, int percent) {
-    gfx_rrect(c, r.x, r.y, r.w, r.h, r.h / 2.0f, 0x30FFFFFF);
-    if (percent > 0) gfx_rrect(c, r.x, r.y, MAX((float)r.h, r.w * MIN(percent, 100) / 100.0f), r.h, r.h / 2.0f, accent());
-}
-
 static void upd_draw(window_t *w, canvas_t *c) {
     upd_t *s = w->data;
+    s->anim = false;
     draw_logo(c, 44, 18, 40, 255);
     text_draw(c, &font_title, 80, 18, "TitanOs " TITANOS_VERSION, C_TEXT);
     char msg[160];
@@ -50,7 +48,8 @@ static void upd_draw(window_t *w, canvas_t *c) {
     text_draw(c, &font_small, 80, 46, msg, col);
     bool busy = st == UPD_CHECKING || st == UPD_DOWNLOADING || st == UPD_INSTALLING;
     if (!busy) ui_button(c, check_rect(c), "Rechercher maintenant", BTN_NORMAL, s->hover == H_CHECK);
-    if (st == UPD_INSTALLING && pc >= 0) progress_bar(c, R(80, 74, c->w - 80 - 250, 8), pc);
+    if (busy) s->anim |= ui_progress(c, R(80, 76, c->w - 80 - 250, 8), &s->pu, st == UPD_CHECKING ? -1 : pc);
+    else s->pu.started = false;
     text_draw(c, &font_small, 28, 118, "Source : github.com/Titangp1/TitanOs (versions publiées)", C_MUTED);
 
     /* mise à jour par clé USB, sans Internet */
@@ -94,7 +93,7 @@ static void upd_draw(window_t *w, canvas_t *c) {
     }
     if (ist == UPD_INSTALLING) {
         text_draw(c, &font_small, 28, c->h - 64, msg, C_TEXT2);
-        progress_bar(c, R(28, c->h - 38, c->w - 56, 10), ipc);
+        s->anim |= ui_progress(c, R(28, c->h - 38, c->w - 56, 10), &s->pi, ipc);
     } else {
         if (ist == UPD_DONE || ist == UPD_ERROR)
             text_fit(c, &font_small, 28, c->h - 42, c->w - 330, msg, ist == UPD_DONE ? 0xFF86EFAC : 0xFFFCA5A5);
@@ -164,6 +163,7 @@ static void upd_event(window_t *w, const event_t *e) {
 
 static void upd_tick(window_t *w, uint64_t now) {
     upd_t *s = w->data;
+    if (s->anim) wm_invalidate(w);                /* barre de progression animée */
     if (now < s->next) return;
     s->next = now + 400;                 /* l'état vient d'un autre processus : on le relit souvent */
     static uint64_t next_disks;

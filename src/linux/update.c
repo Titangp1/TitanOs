@@ -278,7 +278,7 @@ static bool apply_system(const char *root, const char *dev, char *const src[NSYS
 
 /* paquet titanos-maj.tar.gz (téléchargé ou sur une clé) : vérifié puis installé sur le
  * TitanOs en cours */
-static void install_package(const char *tgz, bool quiet) {
+static void install_package_(const char *tgz, bool quiet) {
     char *tar[] = { "/bin/busybox", "tar", "-xzf", (char *)tgz, "-C", WORK, NULL };
     char *sum[] = { "/bin/busybox", "sh", "-c", "cd " WORK " && /bin/busybox sha256sum -c -s SHA256SUMS", NULL };
     say(UPD_INSTALLING, 0, "Vérification du paquet…");
@@ -303,6 +303,14 @@ static void install_package(const char *tgz, bool quiet) {
     say(UPD_DONE, 100, "Bêta %d installée : redémarrez pour l'utiliser.", build);
 }
 
+/* le paquet et ses fichiers extraits (une centaine de Mo, en mémoire vive) sont effacés
+ * dès que l'installation est finie, réussie ou non */
+static void install_package(const char *tgz, bool quiet) {
+    install_package_(tgz, quiet);
+    char *rm[] = { "/bin/busybox", "rm", "-rf", WORK, NULL };
+    run(rm);
+}
+
 static void update_main(void *arg) {
     bool quiet = arg != NULL;              /* recherche automatique : pas d'erreur affichée */
     say(UPD_CHECKING, -1, "Recherche d'une mise à jour…");
@@ -324,6 +332,15 @@ static void update_main(void *arg) {
     if (build < 0) { say(quiet ? UPD_IDLE : UPD_ERROR, -1, "Réponse de GitHub incomprise."); return; }
     if (build <= TITANOS_BUILD) { say(UPD_UPTODATE, -1, "TitanOs est à jour (" TITANOS_VERSION ")."); return; }
     klog("mise à jour : bêta %d disponible", build);
+    /* taille du paquet, pour une barre de progression exacte */
+    long total = 0;
+    char *head[] = { "/bin/busybox", "sh", "-c", "/usr/bin/curl -fsSIL --max-time 20 "
+                     "'https://github.com/" REPO "/releases/latest/download/titanos-maj.tar.gz' | tr -d '\\r' | "
+                     "grep -i '^content-length:' | tail -n 1 | cut -d' ' -f2 > " WORK "/taille", NULL };
+    if (run(head) == 0) {
+        char t[32] = "";
+        if (read_file(WORK "/taille", t, sizeof t) > 0) total = strtol(t, NULL, 10);
+    }
     /* téléchargement, avec la taille reçue affichée */
     char *get[] = { "/usr/bin/curl", "-fsSL", "--max-time", "900", "-o", WORK "/maj.tar.gz",
                     "https://github.com/" REPO "/releases/latest/download/titanos-maj.tar.gz", NULL };
@@ -338,8 +355,11 @@ static void update_main(void *arg) {
     for (;;) {
         if (sys_wait4(pid, &st, WNOHANG_) == pid) break;
         long got = file_size(WORK "/maj.tar.gz");
-        say(UPD_DOWNLOADING, -1, "Téléchargement de la bêta %d… %ld Mo", build, got > 0 ? got >> 20 : 0);
-        sleep_ms(500);
+        if (got < 0) got = 0;
+        if (total > 0) say(UPD_DOWNLOADING, (int)MIN(99, got * 100 / total), "Téléchargement de la bêta %d… %ld Mo sur %ld",
+                           build, got >> 20, (total + (1 << 19)) >> 20);
+        else say(UPD_DOWNLOADING, -1, "Téléchargement de la bêta %d… %ld Mo", build, got >> 20);
+        sleep_ms(250);
     }
     if (st != 0) { say(quiet ? UPD_IDLE : UPD_ERROR, -1, "Le téléchargement a échoué."); return; }
     install_package(WORK "/maj.tar.gz", quiet);

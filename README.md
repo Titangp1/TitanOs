@@ -40,8 +40,10 @@ Quelques programmes d'Alpine sont embarqués pour ce qui ne se réinvente pas :
 | **Mises à jour automatiques** | Une fois en ligne, TitanOs cherche une version plus récente ici, la télécharge en HTTPS, vérifie ses sommes SHA-256 et l'installe. Il suffit ensuite de redémarrer. |
 | **Installation** | Depuis la clé, TitanOs se copie sur le disque interne ou sur une autre clé USB, avec vos fichiers. |
 | **Intégration au portable** | Batterie, touches Fn (luminosité, volume), couvercle, bouton d'alimentation, mise en veille, températures, interrupteur Wi-Fi du VAIO. |
-| **Navigateur web** | Chromium, la base libre de Google Chrome, s'installe tout seul dès la première connexion à Internet et s'ouvre dans une fenêtre TitanOs. |
+| **Navigateur web** | Chromium, la base libre de Google Chrome, s'installe tout seul dès la première connexion à Internet et s'ouvre dans une fenêtre TitanOs. Les téléchargements vont dans *Téléchargements*, le son passe par le haut-parleur. |
+| **Logithèque** | LibreOffice, VS Code, Discord, GIMP, Python et Node.js s'installent en un clic. Chaque application graphique a sa propre fenêtre et rejoint le menu Démarrer avec son icône. |
 | **Applications Linux** | `apk add htop` dans le Terminal installe un programme d'Alpine. Il reste installé dans l'espace des applications créé au premier démarrage. |
+| **Pointeur** | Flèche noire bordée de blanc avec une ombre douce, affichée par la carte graphique : elle suit la souris sans attendre l'image suivante. Elle change de forme sur le texte, les coins de redimensionnement, les liens des pages web. |
 
 <table>
 <tr>
@@ -79,7 +81,8 @@ Il faut 512 Mo de mémoire au minimum. Une fois TitanOs installé, les nouvelles
 
 | Application | Rôle |
 |---|---|
-| **Chromium** | Navigateur web complet (onglets, favoris, mots de passe), avec la disposition de clavier de TitanOs. |
+| **Chromium** | Navigateur web complet (onglets, favoris, mots de passe, téléchargements, vidéos avec le son), avec la disposition de clavier de TitanOs. |
+| **Logithèque** | Installe et désinstalle LibreOffice, VS Code, Discord (Flathub), GIMP, Python 3 et Node.js. Les installations se font une à la fois, avec une barre de progression. |
 | **Fichiers** | Dossiers et fichiers : créer, renommer (F2), dupliquer, supprimer avec confirmation. Chaque fichier s'ouvre avec la bonne application : textes dans le Bloc-notes, images dans la visionneuse, PDF, vidéos, musique et pages web dans Chromium. Les archives (zip, tar.gz, tar.xz…) s'extraient d'un double-clic. Les clés USB branchées apparaissent, avec un bouton *Éjecter*. |
 | **Terminal** | Vrai terminal (VT100/xterm, 256 couleurs, historique). `aide` liste les commandes. |
 | **Bloc-notes** | Édition UTF-8, sélection, copier/coller, Ctrl+S / Ctrl+O. Avertit avant de fermer un texte non enregistré. |
@@ -112,10 +115,10 @@ TitanOs est réglé pour le **Sony VAIO série F (VPCF11)**.
 
 | Composant | Prise en charge |
 |---|---|
-| Écran | Carte NVIDIA GeForce GT 330M (puce GT216) avec le pilote libre `nouveau` : 1920×1080 à 60 Hz, double tampon. Chaque image est envoyée à la carte au rafraîchissement de l'écran, puis la suivante est préparée aussitôt. Les mélanges sont calculés 4 pixels à la fois (SSE2), et la copie vers la mémoire vidéo contourne le cache. Au démarrage, le chargeur utilise des images dessinées pour le mode 1280×1024 du BIOS, aux bonnes proportions. |
+| Écran | Carte NVIDIA GeForce GT 330M (puce GT216) avec le pilote libre `nouveau` : 1920×1080 à 60 Hz, double tampon. Chaque image est envoyée à la carte au rafraîchissement de l'écran, puis la suivante est préparée aussitôt. Les mélanges sont calculés 4 pixels à la fois (SSE2), et la copie vers la mémoire vidéo contourne le cache. Au démarrage, le chargeur prend la résolution de l'écran, même si la carte ne la propose qu'en 16 ou 24 bits (image tramée). Sinon, il utilise des images dessinées pour le mode 1280×1024 du BIOS, aux bonnes proportions. Le pointeur est affiché par la carte (plan « curseur »). |
 | Wi-Fi | Intel Centrino Advanced-N 6200 (`iwlwifi`, micrologiciel officiel d'Intel) ou Atheros AR9287 (`ath9k`). L'interrupteur WIRELESS est détecté et expliqué. |
 | Câble | Marvell Yukon (`sky2`), avec une adresse automatique dès le branchement. |
-| Son | HD Audio (Realtek ALC275), volume réglable aux touches Fn. |
+| Son | HD Audio (Realtek ALC275), volume réglable aux touches Fn. Les applications (Chromium...) passent par ALSA, réglée sur cette sortie avec un mélangeur logiciel. |
 
 Sur les autres PC, les pilotes Intel (`i915`), QEMU et VirtIO sont inclus. Sans pilote adapté, l'écran reste à la résolution donnée par le BIOS.
 
@@ -191,12 +194,12 @@ src/core/             le bureau, indépendant du système
   gfx.c glass.c icons.c           dessin lissé, verre, logo et icônes
   png.c jpeg.c                     images PNG, BMP, JPEG, GIF, PPM
   wm.c ui.c sound.c                fenêtres, dock, animations, widgets, sons
-  apps.c term.c files.c notes.c prefs.c sysapp.c netapp.c updapp.c imgview.c browser.c   applications
+  apps.c term.c files.c notes.c prefs.c sysapp.c netapp.c updapp.c imgview.c browser.c store.c   applications
 src/linux/            ce qui parle au noyau (appels système directs, sans libc)
   main.c                           /init, démarrage, clé, zram, espace des applications
   modules.c display.c input.c      pilotes, écran DRM/KMS (double tampon), clavier, souris, pavé tactile
   audio.c wifi.c plat.c            son ALSA, Wi-Fi (wpa_supplicant), fichiers, système, batterie, horloge
-  update.c volumes.c xbridge.c     mises à jour et installation, clés USB, serveur X de Chromium
+  update.c volumes.c xbridge.c     mises à jour et installation, clés USB, applications X11 (un serveur X par application)
 src/sim/sim.c         version Windows du bureau, pour l'aperçu
 rootfs/etc/           profil du shell, script DHCP, dépôts apk
 tools/                téléchargement Alpine, polices, initramfs, image disque, écran de démarrage, tests

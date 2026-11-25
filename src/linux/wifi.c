@@ -371,11 +371,25 @@ static bool have_snap;
 
 static void helper_main(int out, int in) {
     for (int fd = 3; fd < 256; fd++) if (fd != out && fd != in) sys_close(fd);
-    uint64_t next = 0;
+    /* événements du noyau : chargeur branché ou débranché, batterie qui change d'état */
+    int uev = uevent_open();
+    uint64_t next = 0, next_bat = 0;
+    battery_t bat_last;
+    memset(&bat_last, 0, sizeof bat_last);
     for (;;) {
         uint64_t now = plat_ms();
-        struct pollfd p = { in, POLLIN, 0 };
-        if (sys_poll(&p, 1, next > now ? (int)(next - now) : 0) > 0) {
+        struct pollfd p[2] = { { in, POLLIN, 0 }, { uev, POLLIN, 0 } };
+        if (sys_poll(p, uev >= 0 ? 2 : 1, next > now ? (int)(next - now) : 0) > 0) {
+            if (uev >= 0 && (p[1].revents & POLLIN)) {
+                char ub[4096];
+                long n;
+                while ((n = sys_recv(uev, ub, sizeof ub - 1, 0)) > 0) {
+                    ub[n] = 0;
+                    for (long i = 0; i < n; i += (long)strlen(ub + i) + 1)
+                        if (!strcmp(ub + i, "SUBSYSTEM=power_supply")) { next_bat = 0; next = 0; }
+                }
+            }
+            if (!(p[0].revents & (POLLIN | POLLHUP))) continue;
             wcmd_t c;
             long r = sys_read(in, &c, sizeof c);
             if (r <= 0) sys_exit(0);                    /* le bureau s'est arrêté */
@@ -391,7 +405,11 @@ static void helper_main(int out, int in) {
         while (sys_wait4(-1, &st, WNOHANG_) > 0) {}      /* wpa_supplicant -B laisse un processus fini */
         snap_t s;
         memset(&s, 0, sizeof s);
-        bat_read(&s.bat);
+        /* la batterie est lue par l'ACPI : sur certains portables (VAIO), chaque lecture
+         * interrompt brièvement tout le processeur. Toutes les 15 s suffisent, et tout de
+         * suite quand le noyau signale un changement (chargeur branché, batterie pleine). */
+        if (plat_ms() >= next_bat) { bat_read(&bat_last); next_bat = plat_ms() + 15000; }
+        s.bat = bat_last;
         static int gov = -1;                 /* 1 : performance (secteur), 0 : schedutil (batterie) */
         int want = s.bat.present && !s.bat.ac ? 0 : 1;
         if (want != gov) { gov = want; for_each_dir("/sys/devices/system/cpu", gov_cb, (void *)(want ? "performance" : "schedutil")); }

@@ -257,8 +257,13 @@ static rect_t tray_rect(void) {
 /* menu : 6 applications par ligne ; sa hauteur suit le nombre de lignes (toutes les
  * applications, même filtrées, pour qu'il ne change pas de taille pendant la recherche) */
 #define MENU_COLS 6
+static int menu_total(void) {
+    int n = APP_COUNT;
+    for (int k = 0; k < store_count(); k++) if (store_installed(k)) n++;
+    return n;
+}
 static rect_t menu_rect(void) {
-    int rows = (APP_COUNT + MENU_COLS - 1) / MENU_COLS;
+    int rows = (menu_total() + MENU_COLS - 1) / MENU_COLS;
     int w = 700, h = MIN(136 + rows * 112 + 100, scr_h - DOCK_H - 48);
     return R((scr_w - w) / 2, scr_h - DOCK_H - 24 - h, w, h);
 }
@@ -1086,11 +1091,13 @@ static void draw_tray(void) {
 }
 
 /* menu TitanOs : recherche et grille d'applications */
-static int menu_apps[APP_COUNT], menu_napps;
+static int menu_apps[APP_COUNT + STORE_MAX], menu_napps;
 static void menu_filter(void) {
     menu_napps = 0;
     for (int i = 0; i < APP_COUNT; i++)
         if (str_icontains(app_name(i), menu_search.s)) menu_apps[menu_napps++] = i;
+    for (int k = 0; k < store_count() && k < STORE_MAX; k++)        /* applications de la Logithèque */
+        if (store_installed(k) && str_icontains(store_name(k), menu_search.s)) menu_apps[menu_napps++] = STORE_BASE + k;
     if (menu_sel >= menu_napps) menu_sel = MAX(0, menu_napps - 1);
 }
 static rect_t menu_app_rect(int k) {
@@ -1412,9 +1419,19 @@ static void compose(void) {
     present_rect(D);
 }
 
-/* ---------------- pointeur ---------------- */
-static canvas_t cursor_img;
-static uint32_t cursor_save[24 * 24];
+/* ---------------- pointeur ----------------
+ * Dessiné une fois pour toutes, comme sur un Mac : flèche noire bordée de blanc, avec une
+ * ombre douce. Il est confié au plan « curseur » de la carte graphique : il suit la souris
+ * immédiatement, sans attendre la prochaine image. Sans plan matériel (simpledrm, aperçu),
+ * TitanOs le dessine lui-même. Formes : flèche, texte (barre en I), redimensionnement,
+ * occupé (flèche et cercle qui tourne), ou celle demandée par une application Linux. */
+static canvas_t cur_shape[CURSOR_COUNT];       /* formes dessinées (CURSOR_APP : non utilisée) */
+static int cur_hot[CURSOR_COUNT][2];
+static canvas_t cur_cur;                       /* image du pointeur affiché (copie) */
+static int cur_hx, cur_hy, cur_kind = -1, cur_ver = -1, cur_busy_step = -1;
+static const window_t *cur_appwin;
+static bool cur_hw, cur_hw_failed, cur_hidden;
+static uint32_t cursor_save[64 * 64];
 
 static bool in_poly(const float *p, int n, float x, float y) {
     bool in = false;
@@ -1424,44 +1441,181 @@ static bool in_poly(const float *p, int n, float x, float y) {
     }
     return in;
 }
+static float seg_dist(float px, float py, float ax, float ay, float bx, float by) {
+    float dx = bx - ax, dy = by - ay, l = dx * dx + dy * dy;
+    float t = l > 0 ? ((px - ax) * dx + (py - ay) * dy) / l : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    float ex = ax + t * dx - px, ey = ay + t * dy - py;
+    return __builtin_sqrtf(ex * ex + ey * ey);
+}
 
-static void cursor_make(void) {
-    static const float outer[] = { 1, 1, 1, 19.5f, 5.6f, 15.4f, 8.7f, 22.2f, 11.9f, 20.8f, 8.9f, 14.3f, 15, 14.3f };
-    static const float inner[] = { 2.4f, 4.2f, 2.4f, 16.4f, 6.1f, 13.1f, 9.4f, 20.3f, 10.2f, 19.9f, 7.1f, 12.8f, 11.8f, 12.8f };
-    cursor_img = canvas_new(24, 24);
-    for (int j = 0; j < 24; j++)
-        for (int i = 0; i < 24; i++) {
-            int no = 0, ni = 0;
+/* formes (en pixels, échelle 1) : plusieurs polygones, réunis */
+typedef struct { const float *pts; int n; } cpoly_t;
+
+/* rendu : intérieur noir, bord blanc, ombre douce décalée vers le bas */
+static canvas_t cursor_render(const cpoly_t *polys, int np, float sc, float ox, float oy, int W, int H, float border) {
+    canvas_t c = canvas_new(W, H);
+    if (!c.px) return c;
+    static float shape[64 * 64], white[64 * 64], tmp[64 * 64];
+    for (int j = 0; j < H; j++)
+        for (int i = 0; i < W; i++) {
+            int out = 0, in = 0;
             for (int sy = 0; sy < 4; sy++)
                 for (int sx = 0; sx < 4; sx++) {
-                    float x = i + (sx + 0.5f) / 4, y = j + (sy + 0.5f) / 4;
-                    no += in_poly(outer, 7, x, y);
-                    ni += in_poly(inner, 7, x, y);
+                    float x = ((i + (sx + 0.5f) / 4) - ox) / sc, y = ((j + (sy + 0.5f) / 4) - oy) / sc;
+                    bool inside = false;
+                    float d = 1e9f;
+                    for (int k = 0; k < np && !inside; k++) inside = in_poly(polys[k].pts, polys[k].n, x, y);
+                    if (!inside)
+                        for (int k = 0; k < np; k++)
+                            for (int e = 0, f = polys[k].n - 1; e < polys[k].n; f = e++) {
+                                float dd = seg_dist(x, y, polys[k].pts[2 * f], polys[k].pts[2 * f + 1], polys[k].pts[2 * e], polys[k].pts[2 * e + 1]);
+                                if (dd < d) d = dd;
+                            }
+                    if (inside) { in++; out++; }
+                    else if (d * sc <= border) out++;
                 }
-            uint32_t a = (uint32_t)no * 255 / 16, v = (uint32_t)ni * 255 / 16;
-            cursor_img.px[j * 24 + i] = a << 24 | v << 16 | v << 8 | v;
+            shape[j * W + i] = out / 16.0f;
+            white[j * W + i] = out ? (float)(out - in) / out : 0;
         }
+    /* ombre : forme floutée (moyennes glissantes horizontale puis verticale, deux fois),
+     * décalée d'un pixel vers le bas */
+    static float sh[64 * 64];
+    memcpy(sh, shape, sizeof(float) * (size_t)(W * H));
+    int r = sc > 1.1f ? 2 : 1;
+    for (int pass = 0; pass < 2; pass++) {
+        for (int j = 0; j < H; j++)
+            for (int i = 0; i < W; i++) {
+                float a = 0;
+                for (int k = -r; k <= r; k++) a += sh[j * W + CLAMP(i + k, 0, W - 1)];
+                tmp[j * W + i] = a / (2 * r + 1);
+            }
+        for (int j = 0; j < H; j++)
+            for (int i = 0; i < W; i++) {
+                float a = 0;
+                for (int k = -r; k <= r; k++) a += tmp[CLAMP(j + k, 0, H - 1) * W + i];
+                sh[j * W + i] = a / (2 * r + 1);
+            }
+    }
+    int dy = (int)(sc + 0.5f);
+    for (int j = 0; j < H; j++)
+        for (int i = 0; i < W; i++) {
+            float shv = j - dy >= 0 ? sh[(j - dy) * W + i] * 0.38f : 0;
+            float a = shape[j * W + i], v = white[j * W + i];
+            float A = a + shv * (1 - a);                         /* forme par-dessus l'ombre */
+            uint32_t al = (uint32_t)(A * 255 + 0.5f), w8 = (uint32_t)(a * v * 255 + 0.5f);
+            c.px[j * c.stride + i] = al << 24 | w8 << 16 | w8 << 8 | w8;
+        }
+    return c;
+}
+
+static void cursor_make(void) {
+    float sc = scr_h >= 1000 ? 1.2f : 1.0f;
+    for (int i = 0; i < CURSOR_COUNT; i++) canvas_free(&cur_shape[i]);
+    /* flèche : pointe en (0, 0) */
+    static const float arrow[] = { 0, 0, 0, 16.4f, 3.9f, 12.6f, 6.6f, 18.9f, 9.2f, 17.8f, 6.5f, 11.8f, 11.6f, 11.8f };
+    cpoly_t pa = { arrow, 7 };
+    float o = 2.5f;
+    cur_shape[CURSOR_ARROW] = cursor_render(&pa, 1, sc, o, o, (int)(14 * sc + 8), (int)(21 * sc + 8), 1.5f * sc);
+    cur_hot[CURSOR_ARROW][0] = cur_hot[CURSOR_ARROW][1] = (int)o;
+    /* texte : barre en I */
+    static const float stem[] = { -0.8f, -8.6f, 0.8f, -8.6f, 0.8f, 8.6f, -0.8f, 8.6f };
+    static const float top[] = { -3.4f, -10, 3.4f, -10, 3.4f, -8.4f, -3.4f, -8.4f };
+    static const float bot[] = { -3.4f, 8.4f, 3.4f, 8.4f, 3.4f, 10, -3.4f, 10 };
+    cpoly_t pt[3] = { { stem, 4 }, { top, 4 }, { bot, 4 } };
+    int tw = (int)(10 * sc + 8), th = (int)(22 * sc + 8);
+    cur_shape[CURSOR_TEXT] = cursor_render(pt, 3, sc, tw / 2.0f, th / 2.0f, tw, th, 1.3f * sc);
+    cur_hot[CURSOR_TEXT][0] = tw / 2;
+    cur_hot[CURSOR_TEXT][1] = th / 2;
+    /* redimensionnement : double flèche en diagonale (haut gauche - bas droite) */
+    static const float dbl0[] = { -9, 0, -4.6f, -4.4f, -4.6f, -1.1f, 4.6f, -1.1f, 4.6f, -4.4f, 9, 0, 4.6f, 4.4f, 4.6f, 1.1f, -4.6f, 1.1f, -4.6f, 4.4f };
+    static float dbl[20];
+    for (int i = 0; i < 10; i++) {                           /* rotation de 45° */
+        float x = dbl0[2 * i], y = dbl0[2 * i + 1];
+        dbl[2 * i] = (x - y) * 0.7071f;
+        dbl[2 * i + 1] = (x + y) * 0.7071f;
+    }
+    cpoly_t pr = { dbl, 10 };
+    int rw = (int)(16 * sc + 8);
+    cur_shape[CURSOR_RESIZE] = cursor_render(&pr, 1, sc, rw / 2.0f, rw / 2.0f, rw, rw, 1.4f * sc);
+    cur_hot[CURSOR_RESIZE][0] = cur_hot[CURSOR_RESIZE][1] = rw / 2;
+    cur_kind = -1;                                           /* à renvoyer à la carte */
+}
+
+/* occupé : la flèche et un petit cercle qui tourne (image refaite à chaque pas) */
+static void cursor_busy_image(canvas_t *dst, int step) {
+    const canvas_t *a = &cur_shape[CURSOR_ARROW];
+    int W = MIN(64, a->w + 16), H = MIN(64, a->h + 6);
+    if (dst->w != W || dst->h != H) { canvas_free(dst); *dst = canvas_new(W, H); }
+    if (!dst->px) return;
+    canvas_clear(dst, 0);
+    gfx_blit(dst, 0, 0, a, 255);
+    float cx = W - 9.0f, cy = H - 11.0f, r = 5.5f;
+    gfx_ring(dst, cx, cy, r, 3.6f, 0xD0FFFFFF);
+    float a0 = step * 3.14159265f * 2 / 12;
+    gfx_arc(dst, cx, cy, r, 2.0f, a0, a0 + 4.2f, 0xFF1F2937);
+}
+
+/* choisit la forme selon ce qui est sous la souris, et la donne à la carte graphique */
+static bool near_resize(window_t *w, int x, int y);
+static window_t *window_at(int x, int y);
+static void cursor_update(void) {
+    int k = CURSOR_ARROW;
+    window_t *w = NULL;
+    bool hide = mode == MODE_SPLASH;
+    if (drag_kind == DR_SIZE) k = CURSOR_RESIZE;
+    else if (mode == MODE_DESK && !menu_open && !pop_open) {
+        w = alive(capture) ? capture : window_at(mx, my);
+        if (w && near_resize(w, mx, my)) k = CURSOR_RESIZE;
+        else if (w && rect_has(wm_client(w), mx, my)) {
+            k = w->cursor;
+            if (k == CURSOR_APP && !w->cursor_img.px) k = CURSOR_ARROW;
+        }
+    }
+    int step = k == CURSOR_BUSY ? (int)(now / 80 % 12) : -1;
+    const window_t *cw = k == CURSOR_APP ? w : NULL;
+    int ver = cw ? cw->cursor_ver : 0;
+    if (hide == cur_hidden && k == cur_kind && cw == cur_appwin && ver == cur_ver && step == cur_busy_step) return;
+    rect_t old = R(cur_ox - cur_hx, cur_oy - cur_hy, cur_cur.w, cur_cur.h);
+    cur_hidden = hide;
+    cur_kind = k;
+    cur_appwin = cw;
+    cur_ver = ver;
+    cur_busy_step = step;
+    const canvas_t *src = k == CURSOR_APP ? &w->cursor_img : &cur_shape[k];
+    if (k == CURSOR_BUSY) { cursor_busy_image(&cur_cur, step); cur_hx = cur_hot[CURSOR_ARROW][0]; cur_hy = cur_hot[CURSOR_ARROW][1]; }
+    else {
+        if (cur_cur.w != src->w || cur_cur.h != src->h) { canvas_free(&cur_cur); cur_cur = canvas_new(src->w, src->h); }
+        if (cur_cur.px) for (int j = 0; j < src->h; j++) memcpy(cur_cur.px + (size_t)j * cur_cur.stride, src->px + (size_t)j * src->stride, (size_t)src->w * 4);
+        cur_hx = k == CURSOR_APP ? w->cursor_hx : cur_hot[k][0];
+        cur_hy = k == CURSOR_APP ? w->cursor_hy : cur_hot[k][1];
+    }
+    if (!cur_hw_failed) {
+        cur_hw = hide ? plat_cursor_image(NULL, 0, 0) : plat_cursor_image(&cur_cur, cur_hx, cur_hy);
+        if (!cur_hw) cur_hw_failed = true;
+        else plat_cursor_move(mx, my);
+    }
+    if (!cur_hw) { damage(old, 0); cursor_moved = true; }
 }
 
 static void present_rect(rect_t P) {
-    rect_t cr = R(mx - 1, my - 1, 24, 24), old = R(cur_ox - 1, cur_oy - 1, 24, 24);
-    if (cursor_moved) P = rect_union(rect_union(P, old), cr);
+    rect_t cr = R(mx - cur_hx, my - cur_hy, cur_cur.w, cur_cur.h), old = R(cur_ox - cur_hx, cur_oy - cur_hy, cur_cur.w, cur_cur.h);
+    bool show = !cur_hw && !cur_hidden && cur_cur.px;
+    if (cursor_moved && !cur_hw) P = rect_union(rect_union(P, old), cr);
     P = rect_isect(P, R(0, 0, scr_w, scr_h));
     cursor_moved = false;
     cur_ox = mx;
     cur_oy = my;
     if (rect_empty(P)) return;
-    bool show = mode != MODE_SPLASH;
     rect_t ci = rect_isect(cr, R(0, 0, scr_w, scr_h));
-    if (show) {
+    if (show)
         for (int j = 0; j < ci.h; j++)
-            memcpy(cursor_save + j * 24, scene.px + (size_t)(ci.y + j) * scene.stride + ci.x, (size_t)ci.w * 4);
-        gfx_blit(&scene, cr.x, cr.y, &cursor_img, 255);
-    }
+            memcpy(cursor_save + j * 64, scene.px + (size_t)(ci.y + j) * scene.stride + ci.x, (size_t)ci.w * 4);
+    if (show) gfx_blit(&scene, cr.x, cr.y, &cur_cur, 255);
     plat_present(scene.px, scene.stride, P);
     if (show)
         for (int j = 0; j < ci.h; j++)
-            memcpy(scene.px + (size_t)(ci.y + j) * scene.stride + ci.x, cursor_save + j * 24, (size_t)ci.w * 4);
+            memcpy(scene.px + (size_t)(ci.y + j) * scene.stride + ci.x, cursor_save + j * 64, (size_t)ci.w * 4);
 }
 
 /* ---------------- entrées ---------------- */
@@ -1605,7 +1759,7 @@ static void icon_menu_cb(int i, void *ctx) {
     else if (i == 2) desk_remove(menu_icon_idx);
 }
 
-static int add_choices[APP_COUNT], add_n;
+static int add_choices[APP_COUNT + STORE_MAX], add_n;
 static void add_menu_cb(int i, void *ctx) {
     (void)ctx;
     if (i >= 0 && i < add_n) wm_desk_add_app(add_choices[i]);
@@ -1616,12 +1770,17 @@ static void desk_menu_cb(int i, void *ctx) {
     if (i == 0) app_terminal_open();
     else if (i == 1) app_files_open(NULL);
     else if (i == 3) {                       /* applications qui ne sont pas encore sur le bureau */
-        static const char *names[APP_COUNT];
+        static const char *names[APP_COUNT + STORE_MAX];
         add_n = 0;
         for (int a = 0; a < APP_COUNT; a++) {
             bool on = false;
             for (int j = 0; j < NDESK; j++) if (g_set.desk[j].app == a) on = true;
             if (!on) { add_choices[add_n] = a; names[add_n++] = app_name(a); }
+        }
+        for (int k = 0; k < store_count() && k < STORE_MAX; k++) {
+            bool on = !store_installed(k);
+            for (int j = 0; j < NDESK; j++) if (g_set.desk[j].app == STORE_BASE + k) on = true;
+            if (!on) { add_choices[add_n] = STORE_BASE + k; names[add_n++] = store_name(k); }
         }
         if (!add_n) { wm_toast("Toutes les applications sont déjà sur le bureau."); return; }
         wm_menu(mx, my, names, add_n, add_menu_cb, NULL);
@@ -1951,14 +2110,17 @@ void core_event(const event_t *e) {
         else { mx += e->dx * (speed + 1) / 4; my += e->dy * (speed + 1) / 4; }
         mx = CLAMP(mx, 0, scr_w - 1);
         my = CLAMP(my, 0, scr_h - 1);
-        cursor_moved = true;
+        if (cur_hw) plat_cursor_move(mx, my);
+        else cursor_moved = true;
         if (mode == MODE_DESK) motion();
+        cursor_update();
         return;
     }
     if (e->type == EV_BUTTON) {
         mods = e->mods;
         mouse_button(e);
         update_hover();
+        cursor_update();
         return;
     }
     if (e->type == EV_WHEEL && mode == MODE_DESK && !menu_open) {
@@ -1987,7 +2149,9 @@ void core_init(int w, int h) {
 }
 
 void core_resize(int w, int h) {
-    if (w == scr_w && h == scr_h) return;
+    cur_hw = cur_hw_failed = false;                  /* nouvel écran : nouveau plan curseur */
+    cur_kind = -1;
+    if (w == scr_w && h == scr_h) { damage_all(); return; }   /* même taille : tout est redessiné */
     canvas_free(&scene);
     scr_w = w;
     scr_h = h;
@@ -1995,6 +2159,7 @@ void core_resize(int w, int h) {
     T = &scene;
     mx = CLAMP(mx, 0, w - 1);
     my = CLAMP(my, 0, h - 1);
+    cursor_make();
     for (int i = 0; i < MAX_WIN; i++)
         if (alive(&wins[i])) {
             window_t *win = &wins[i];
@@ -2191,8 +2356,9 @@ int core_frame(void) {
         mask_corners(&w->surf);
         damage(wm_client(w), win_level(w));
     }
+    cursor_update();
     if (ndmg) compose();
-    else if (cursor_moved) present_rect(R(0, 0, 0, 0));
+    else if (cursor_moved && !cur_hw) present_rect(R(0, 0, 0, 0));
     if (g_toast.shown || g_osd.shown) wait = MIN(wait, 100);
     return wait;
 }

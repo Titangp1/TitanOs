@@ -26,6 +26,7 @@
 #define E820_TMP    0x6F00
 #define ZP_E820N    0x1E8
 #define ZP_E820     0x2D0
+#define OFFSCR      0x3000000       /* image de travail 32 bits, si l'écran est en 16 ou 24 bits */
 
     .code16
     .text
@@ -288,7 +289,9 @@ e820_next:
 e820_done:
     ret
 
-/* écran : le plus grand mode VBE 32 bits linéaire (jusqu'à 1920x1200), décrit dans screen_info */
+/* écran : le plus grand mode VBE linéaire (jusqu'à 1920x1200), décrit dans screen_info.
+ * La résolution de l'écran passe avant tout : beaucoup de cartes (NVIDIA des VAIO...) ne
+ * proposent la résolution native qu'en 16 ou 24 bits ; à taille égale, 32 bits est préféré. */
 setup_video:
     movw    $VBE_INFO, %di
     movl    $0x32454256, (%di)          /* « VBE2 » */
@@ -348,8 +351,19 @@ vm_next:
     andw    $0x0099, %ax
     cmpw    $0x0099, %ax
     jne     vm_next
-    cmpb    $32, MODE_INFO + 25
+    cmpw    $1024, MODE_INFO + 18       /* liste des modes, notée pour le journal */
+    jb      5f
+    call    vbe_note
+5:  movb    MODE_INFO + 25, %al
+    cmpb    $32, %al
+    je      6f
+    cmpb    $6, MODE_INFO + 27          /* 16 ou 24 bits : couleurs directes seulement */
     jne     vm_next
+    cmpb    $24, %al
+    je      6f
+    cmpb    $16, %al
+    jne     vm_next
+6:
     movzwl  MODE_INFO + 18, %eax
     cmpl    $1920, %eax
     ja      vm_next
@@ -386,7 +400,10 @@ vm_next:
     popl    %eax
     ja      2f
     addl    $0x20000000, %eax
-2:  cmpl    best_area, %eax
+2:  movzbl  MODE_INFO + 25, %edx        /* à taille égale : le plus de couleurs */
+    shrl    $3, %edx
+    addl    %edx, %eax
+    cmpl    best_area, %eax
     jbe     vm_next
     movl    %eax, best_area
     movw    cur_mode, %ax
@@ -397,7 +414,8 @@ vm_next:
     movw    %ax, zeropage + 0x12        /* largeur */
     movw    MODE_INFO + 20, %ax
     movw    %ax, zeropage + 0x14        /* hauteur */
-    movw    $32, zeropage + 0x16        /* bits par pixel */
+    movzbl  MODE_INFO + 25, %eax
+    movw    %ax, zeropage + 0x16        /* bits par pixel */
     movl    MODE_INFO + 40, %eax
     movl    %eax, zeropage + 0x18       /* adresse du framebuffer */
     movzwl  VBE_INFO + 18, %eax
@@ -418,6 +436,7 @@ vm_next:
     jmp     vm_next
 
 vm_done:
+    call    add_vbe_arg
     cmpw    $0, best_mode
     je      vbe_fail
     movw    $0x4F02, %ax
@@ -435,7 +454,10 @@ vm_done:
     movl    %eax, scr_w
     movzwl  zeropage + 0x14, %eax
     movl    %eax, scr_h
-    /* on ne dessine que si les couleurs sont dans l'ordre habituel (rouge 16, vert 8, bleu 0) */
+    /* dessin direct en 32 bits, couleurs dans l'ordre habituel (rouge 16, vert 8, bleu 0) ;
+     * sinon, on dessine dans une image de travail 32 bits, convertie ensuite (flush) */
+    cmpw    $32, zeropage + 0x16
+    jne     2f
     cmpb    $16, zeropage + 0x27
     jne     2f
     cmpb    $8, zeropage + 0x29
@@ -443,7 +465,25 @@ vm_done:
     cmpb    $0, zeropage + 0x2B
     jne     2f
     ret
-2:  movb    $0, gfx_mode                /* mode réglé pour Linux, mais pas de dessin */
+2:  movzwl  zeropage + 0x16, %eax       /* octets par pixel */
+    addl    $7, %eax
+    shrl    $3, %eax
+    cmpl    $2, %eax
+    jb      3f
+    cmpl    $4, %eax
+    ja      3f
+    movl    %eax, real_bpp
+    movl    fb_base, %eax
+    movl    %eax, real_base
+    movl    fb_pitch, %eax
+    movl    %eax, real_pitch
+    movl    $OFFSCR, fb_base
+    movl    scr_w, %eax
+    shll    $2, %eax
+    movl    %eax, fb_pitch
+    movb    $1, use_off
+    ret
+3:  movb    $0, gfx_mode                /* mode réglé pour Linux, mais pas de dessin */
     ret
 vbe_fail:
     /* pas de mode graphique : on reste en texte, le pilote de la carte prendra le relais */
@@ -680,6 +720,13 @@ draw_splash:
     addl    bimg_base, %eax
     movl    %eax, %esi
     call    blit_a
+    movl    $0, rx                      /* image de travail : tout l'écran recopié */
+    movl    $0, ry
+    movl    scr_w, %eax
+    movl    %eax, rw
+    movl    scr_h, %eax
+    movl    %eax, rh
+    call    flush
     movw    $0xFFFF, cur_frame
     movb    $1, gfx
     call    spin_update
@@ -727,6 +774,184 @@ spin_update:
     addl    bimg_base, %eax
     movl    %eax, %esi
     call    blit_a
+    call    flush
+9:  ret
+
+/* image de travail -> écran 15, 16 ou 24 bits (ou 32 bits dans un autre ordre), pour la
+ * zone (rx, ry, rw, rh). Tramage 2 x 2 : les dégradés restent lisses en 16 bits. */
+.macro CHAN sh, szo, poso
+    movl    %esi, %ebx
+    shrl    $\sh, %ebx
+    andl    $0xFF, %ebx
+    movzbl  zeropage + \szo, %ecx      /* bits de la couleur */
+    pushl   %eax
+    movl    $256, %eax
+    shrl    %cl, %eax
+    imull   %edi, %eax                  /* tramage : 0 à 3 quarts d'un pas */
+    shrl    $2, %eax
+    addl    %eax, %ebx
+    cmpl    $255, %ebx
+    jbe     1f
+    movl    $255, %ebx
+1:  popl    %eax
+    negl    %ecx
+    addl    $8, %ecx
+    shrl    %cl, %ebx
+    movzbl  zeropage + \poso, %ecx
+    shll    %cl, %ebx
+    orl     %ebx, %eax
+.endm
+
+/* EAX = 0x00RRGGBB, EDX = x, ECX = y -> EAX : pixel au format de l'écran */
+conv_px:
+    pushl   %ebx
+    pushl   %ecx
+    pushl   %esi
+    pushl   %edi
+    movl    %eax, %esi
+    movl    %edx, %edi
+    andl    $1, %edi
+    andl    $1, %ecx
+    shll    $1, %ecx
+    orl     %ecx, %edi
+    movzbl  bayer(%edi), %edi
+    xorl    %eax, %eax
+    CHAN    16, 0x26, 0x27
+    CHAN    8, 0x28, 0x29
+    CHAN    0, 0x2A, 0x2B
+    popl    %edi
+    popl    %esi
+    popl    %ecx
+    popl    %ebx
+    ret
+
+flush:
+    cmpb    $0, use_off
+    je      9f
+    pushal
+    movl    ry, %ecx
+    movl    rh, %ebx
+1:  testl   %ebx, %ebx
+    jz      8f
+    movl    %ecx, %esi                  /* source : image de travail */
+    imull   fb_pitch, %esi
+    addl    $OFFSCR, %esi
+    movl    rx, %eax
+    shll    $2, %eax
+    addl    %eax, %esi
+    movl    %ecx, %edi                  /* destination : l'écran */
+    imull   real_pitch, %edi
+    addl    real_base, %edi
+    movl    rx, %eax
+    imull   real_bpp, %eax
+    addl    %eax, %edi
+    pushl   %ebx
+    movl    rx, %edx
+    movl    rw, %ebp
+    testl   %ebp, %ebp
+    jz      7f
+2:  movl    (%esi), %eax
+    addl    $4, %esi
+    call    conv_px
+    cmpl    $2, real_bpp
+    jne     3f
+    movw    %ax, (%edi)
+    addl    $2, %edi
+    jmp     5f
+3:  cmpl    $3, real_bpp
+    jne     4f
+    movw    %ax, (%edi)
+    shrl    $16, %eax
+    movb    %al, 2(%edi)
+    addl    $3, %edi
+    jmp     5f
+4:  movl    %eax, (%edi)
+    addl    $4, %edi
+5:  incl    %edx
+    decl    %ebp
+    jnz     2b
+7:  popl    %ebx
+    incl    %ecx
+    decl    %ebx
+    jmp     1b
+8:  popal
+9:  ret
+
+/* liste des modes VBE (WxHxB,) : ajoutée à la ligne de commande, Linux la garde dans le journal */
+vbe_note:
+    pushal
+    movw    vbe_len, %di
+    cmpw    $200, %di
+    ja      9f
+    addw    $vbe_list, %di
+    movzwl  MODE_INFO + 18, %eax
+    call    put_dec
+    movb    $'x', (%di)
+    incw    %di
+    movzwl  MODE_INFO + 20, %eax
+    call    put_dec
+    movb    $'x', (%di)
+    incw    %di
+    movzbl  MODE_INFO + 25, %eax
+    call    put_dec
+    movb    $',', (%di)
+    incw    %di
+    subw    $vbe_list, %di
+    movw    %di, vbe_len
+9:  popal
+    ret
+
+/* EAX -> chiffres décimaux en DS:DI (DI avance) */
+put_dec:
+    pushl   %ebx
+    pushl   %ecx
+    pushl   %edx
+    movl    $10, %ebx
+    xorl    %ecx, %ecx
+1:  xorl    %edx, %edx
+    divl    %ebx
+    pushw   %dx
+    incw    %cx
+    testl   %eax, %eax
+    jnz     1b
+2:  popw    %dx
+    addb    $'0', %dl
+    movb    %dl, (%di)
+    incw    %di
+    decw    %cx
+    jnz     2b
+    popl    %edx
+    popl    %ecx
+    popl    %ebx
+    ret
+
+/* « titanos.vbe=... » à la fin de la ligne de commande */
+add_vbe_arg:
+    cmpw    $0, vbe_len
+    je      9f
+    movw    $cmdline, %di
+1:  cmpb    $0, (%di)
+    je      2f
+    incw    %di
+    jmp     1b
+2:  movw    $m_vbearg, %si
+3:  lodsb
+    testb   %al, %al
+    jz      4f
+    movb    %al, (%di)
+    incw    %di
+    jmp     3b
+4:  movw    $vbe_list, %si
+    movw    vbe_len, %cx
+    decw    %cx                         /* sans la dernière virgule */
+5:  testw   %cx, %cx
+    jz      6f
+    lodsb
+    movb    %al, (%di)
+    incw    %di
+    decw    %cx
+    jmp     5b
+6:  movb    $0, (%di)
 9:  ret
 
 /* ajoute « titanos.disk=xxxxxxxx » à la ligne de commande : la signature du disque qui a
@@ -792,6 +1017,8 @@ pick_variant:
 drive:      .byte 0x80
 gfx_mode:   .byte 0                     /* mode graphique réglé et dessinable */
 gfx:        .byte 0                     /* écran de démarrage affiché */
+use_off:    .byte 0                     /* dessin dans l'image de travail (écran 16/24 bits) */
+bayer:      .byte 0, 2, 3, 1            /* tramage 2 x 2 */
     .balign 2
 mode_off:   .word 0
 mode_seg:   .word 0
@@ -801,6 +1028,7 @@ chunk:      .word 0
 tries:      .word 0
 dots:       .word 0
 cur_frame:  .word 0xFFFF
+vbe_len:    .word 0
     .balign 4
 best_area:  .long 0
 bimg_base:  .long BIMG
@@ -818,6 +1046,9 @@ ry:         .long 0
 rw:         .long 0
 rh:         .long 0
 bgcol:      .long 0
+real_base:  .long 0
+real_pitch: .long 0
+real_bpp:   .long 4
 fgcol:      .long 0
 dap:        .byte 0x10, 0
 dap_count:  .word 0
@@ -837,7 +1068,9 @@ gdtr:
     .long gdt
 
 m_diskarg: .asciz " titanos.disk="
-m_hello:  .asciz "TitanOs beta 23 - demarrage BIOS\r\n"
+m_vbearg:  .asciz " titanos.vbe="
+vbe_list:  .fill 220, 1, 0
+m_hello:  .asciz "TitanOs beta 24 - demarrage BIOS\r\n"
 m_kernel: .asciz "  Noyau Linux "
 m_initrd: .asciz "  Systeme TitanOs "
 m_ok:     .asciz " OK\r\n"

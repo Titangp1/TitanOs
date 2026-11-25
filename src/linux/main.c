@@ -292,6 +292,7 @@ static void start_journal(void) {
         " for p in /proc/[0-9]*; do echo \"${p#/proc/} $(cat $p/comm) $(cut -d' ' -f3 $p/stat) $(cat $p/wchan)\"; done;"
         " echo; echo '== piles des processus TitanOs';"
         " for p in /proc/[0-9]*; do [ \"$(cat $p/comm)\" = init ] && { echo \"-- ${p#/proc/}\"; cat $p/stack; }; done;"
+        " echo; echo '== ligne de commande'; cat /proc/cmdline;"
         " echo; echo '== entrees'; ls -l /dev/input /dev/dri; cat /proc/bus/input/devices;"
         " echo; echo '== pilotes'; cut -d' ' -f1 /proc/modules | tr '\\n' ' '; echo;"
         " echo; echo '== blocs'; cat /proc/partitions; echo; echo '== montages'; cat /proc/mounts;"
@@ -385,7 +386,7 @@ static void prepare_home(bool on_key, const char *storage) {
     if (first) {
         char p[256];
         snprintf(p, sizeof p, "%s/Bienvenue.txt", home);
-        const char *t = "Bienvenue dans TitanOs (bêta 23) !\n\n"
+        const char *t = "Bienvenue dans TitanOs (bêta 24) !\n\n"
                         "TitanOs tourne sur le noyau Linux : Linux fournit les pilotes (écran, clavier,\n"
                         "USB, Wi-Fi, son...), et tout le reste est écrit pour TitanOs.\n\n"
                         "Vos fichiers sont gardés sur la clé USB, dans le dossier Utilisateur.\n"
@@ -438,6 +439,31 @@ static void crash_guard(void) {
         (void *)crash_restorer, 0 };
     static const int sigs[] = { 4 /* SIGILL */, 6 /* SIGABRT */, 7 /* SIGBUS */, 8 /* SIGFPE */, 11 /* SIGSEGV */ };
     for (int i = 0; i < countof(sigs); i++) sys_rt_sigaction(sigs[i], &sa, NULL);
+}
+
+/* Nettoyage au démarrage, en tâche de fond : restes de téléchargements et caches qui ne
+ * servent plus. Les mises à jour de TitanOs réécrivent les fichiers du système à leur place
+ * (tailles fixes) : aucune ancienne version ne s'accumule sur le disque. */
+static void cleanup_start(void) {
+    static const char script[] =
+        "f=0; for d in /tmp/maj /var/cache/apk /root/.config/chromium/Crash\\ Reports/completed; do"
+        " [ -d \"$d\" ] || continue; k=$(du -sk \"$d\" 2>/dev/null | cut -f1); f=$((f + ${k:-0})); rm -rf \"$d\"/* 2>/dev/null; done;"
+        " rm -f /media/titanos/*.tmp /media/titanos/.titanos/*.tmp 2>/dev/null;"
+        " echo \"<6>titanos: nettoyage : $((f / 1024)) Mo liberes\" > /dev/kmsg";
+    char *argv[] = { "/bin/busybox", "sh", "-c", (char *)script, NULL };
+    spawn_quiet(argv);
+}
+
+/* identifiant de la machine (demandé par D-Bus et Flatpak) */
+static void machine_id(void) {
+    if (path_exists("/etc/machine-id")) return;
+    uint8_t r[16];
+    plat_random(r, sizeof r);
+    char hex[34];
+    for (int i = 0; i < 16; i++) snprintf(hex + i * 2, 3, "%02x", r[i]);
+    hex[32] = '\n';
+    hex[33] = 0;
+    write_file("/etc/machine-id", hex);
 }
 
 static int session_main(void) {
@@ -506,6 +532,7 @@ static int session_main(void) {
     settings_load();
     if (g_set.brightness >= 0) plat_brightness(g_set.brightness);
     audio_start();
+    machine_id();
     hw_start();                              /* Wi-Fi et batterie : processus séparé */
     net_autostart();
     diag_key = on_key ? "montée" : "introuvable";
@@ -515,32 +542,58 @@ static int session_main(void) {
     core_start();
     if (!on_key) wm_toast("Clé TITANOS introuvable : vos fichiers ne seront pas conservés.");
 
+    /* périphériques branchés ou retirés : signalés par le noyau, plus besoin de tout
+     * réexaminer toutes les secondes (un examen de secours reste fait toutes les 10 s) */
+    int uev = uevent_open();
+    cleanup_start();
     uint64_t next_scan = 0, next_net = 0, next_vol = 0, next_stat = plat_ms() + 10000;
-    uint64_t st_frames = 0, st_us = 0, st_max = 0;
+    uint64_t st_frames = 0, st_us = 0, st_max = 0, st_slow = 0, st_stall = 0, st_stall_max = 0;
     for (;;) {
         struct pollfd pf[24];
-        int n = input_fill_poll(pf, 24);
+        int n = input_fill_poll(pf, 23), nin = n;
+        if (uev >= 0) { pf[n].fd = uev; pf[n].events = POLLIN; pf[n].revents = 0; n++; }
         struct timespec t0, t1;
         sys_clock_gettime(CLOCK_MONOTONIC, &t0);
         int wait = core_frame();
         sys_clock_gettime(CLOCK_MONOTONIC, &t1);
         uint64_t us = (uint64_t)(t1.tv_sec - t0.tv_sec) * 1000000 + (uint64_t)((t1.tv_nsec - t0.tv_nsec) / 1000);
-        if (us > 1000) { st_frames++; st_us += us; if (us > st_max) st_max = us; }
+        if (us > 1000) { st_frames++; st_us += us; if (us > st_max) st_max = us; if (us > 20000) st_slow++; }
         if (plat_ms() >= next_stat) {        /* mesure de fluidité, dans le journal */
-            if (st_frames) klog("images : %d en 10 s, %d ms en moyenne (max %d), dont envoi à l'écran %d ms",
-                                (int)st_frames, (int)(st_us / st_frames / 1000), (int)(st_max / 1000), (int)(display_us / st_frames / 1000));
-            st_frames = st_us = st_max = 0;
+            if (st_frames || st_stall)
+                klog("images : %d en 10 s, %d ms en moyenne (max %d, %d de plus de 20 ms), envoi à l'écran %d ms ; "
+                     "retards du système : %d (max %d ms)",
+                     (int)st_frames, st_frames ? (int)(st_us / st_frames / 1000) : 0, (int)(st_max / 1000), (int)st_slow,
+                     st_frames ? (int)(display_us / st_frames / 1000) : 0, (int)st_stall, (int)st_stall_max);
+            st_frames = st_us = st_max = st_slow = st_stall = st_stall_max = 0;
             display_us = 0;
             next_stat = plat_ms() + 10000;
         }
         if (display_flipped() && wait <= 16) wait = 0;
+        uint64_t tp = plat_ms();
         sys_poll(pf, n, wait);
-        input_read(pf, n);
+        /* réveil en retard : le processus n'a pas pu tourner (autre tâche, ou le
+         * micrologiciel du PC qui a suspendu le processeur) */
+        uint64_t late = plat_ms() - tp;
+        if (wait >= 0 && late > (uint64_t)wait + 25) { st_stall++; if (late - (uint64_t)wait > st_stall_max) st_stall_max = late - (uint64_t)wait; }
+        input_read(pf, nin);
+        bool ev_in = false, ev_blk = false, ev_net = false;
+        if (uev >= 0 && (pf[nin].revents & POLLIN)) {
+            char ub[4096];
+            long r;
+            while ((r = sys_recv(uev, ub, sizeof ub - 1, 0)) > 0) {
+                ub[r] = 0;
+                for (long i = 0; i < r; i += (long)strlen(ub + i) + 1) {
+                    if (!strcmp(ub + i, "SUBSYSTEM=input")) ev_in = true;
+                    else if (!strcmp(ub + i, "SUBSYSTEM=block")) ev_blk = true;
+                    else if (!strcmp(ub + i, "SUBSYSTEM=net")) ev_net = true;
+                }
+            }
+        }
         plat_tick();
         uint64_t now = plat_ms();
-        if (now >= next_scan) { next_scan = now + 1500; input_scan(); }
-        if (now >= next_net) { next_net = now + 3000; net_autostart(); }
-        if (now >= next_vol) { next_vol = now + 2000; volumes_poll(); }
+        if (ev_in || now >= next_scan) { next_scan = now + 10000; input_scan(); }
+        if (ev_net || now >= next_net) { next_net = now + 10000; net_autostart(); }
+        if (ev_blk || now >= next_vol) { next_vol = now + 10000; volumes_poll(); }
     }
 }
 

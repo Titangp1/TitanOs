@@ -6,12 +6,23 @@
 /* ---------------- icônes (icons.c) ---------------- */
 enum {
     ICON_FILES, ICON_TERMINAL, ICON_NOTES, ICON_CALC, ICON_SETTINGS, ICON_SYSTEM,
-    ICON_NETWORK, ICON_SNAKE, ICON_ABOUT, ICON_UPDATE, ICON_BROWSER,   /* les applications */
+    ICON_NETWORK, ICON_SNAKE, ICON_ABOUT, ICON_UPDATE, ICON_BROWSER, ICON_STORE,   /* les applications */
     ICON_FOLDER, ICON_FILE, ICON_IMAGE, ICON_LOCK, ICON_REBOOT, ICON_POWER,
     ICON_HOME, ICON_USB, ICON_DISK, ICON_SEARCH, ICON_WIFI, ICON_ETHERNET, ICON_VOLUME, ICON_MUTE,
     ICON_BATTERY, ICON_BRIGHTNESS, ICON_COUNT
 };
-#define APP_COUNT 11
+#define APP_COUNT 12
+/* applications installées par la Logithèque : numéros STORE_BASE + k (menu, dock, bureau) */
+#define STORE_BASE 64
+#define STORE_MAX  16
+int         store_count(void);
+bool        store_installed(int k);
+const char *store_name(int k);
+void        store_draw_icon(canvas_t *c, int k, float x, float y, float s);
+void        store_launch(int k);
+void        app_store_open(void);
+void        app_terminal_run(const char *cmd);      /* Terminal qui lance une commande */
+void        icon_squircle(canvas_t *c, float x, float y, float s, uint32_t top, uint32_t bottom);
 const char *app_name(int icon);
 void        app_open(int icon);
 void        draw_wifi(canvas_t *c, float cx, float cy, float s, int level, uint32_t col, uint32_t dim);  /* level 0-4 */
@@ -92,9 +103,14 @@ struct window {
     void   (*tick)(window_t *w, uint64_t now);
     void   (*on_close)(window_t *w);
     bool   (*can_close)(window_t *w);  /* false : la fenêtre s'en occupe (demande de confirmation) */
+    int      cursor;                /* forme du pointeur dans la zone client (CURSOR_*) */
+    canvas_t cursor_img;            /* CURSOR_APP : image fournie par l'application */
+    int      cursor_hx, cursor_hy, cursor_ver;
     void   (*raw_key)(window_t *w, int code, bool down);   /* touches brutes (codes du clavier), au lieu des caractères */
 };
 
+/* formes du pointeur */
+enum { CURSOR_ARROW, CURSOR_TEXT, CURSOR_RESIZE, CURSOR_BUSY, CURSOR_APP, CURSOR_COUNT };
 extern int  scr_w, scr_h;
 window_t *wm_open(const char *title, int icon, int w, int h, unsigned flags);
 void      wm_close(window_t *w);
@@ -138,6 +154,11 @@ bool      wm_kbd_layout_toggle(void);
 enum { BTN_NORMAL, BTN_ACCENT, BTN_DANGER, BTN_FLAT };
 void ui_panel(canvas_t *c, rect_t r, float radius);
 void ui_button(canvas_t *c, rect_t r, const char *label, int style, bool hover);
+/* barre de progression fluide : elle glisse vers la valeur réelle, avance doucement entre
+ * deux nouvelles et un reflet la parcourt ; percent < 0 : durée inconnue. Renvoie true tant
+ * qu'elle est animée (la fenêtre doit alors être redessinée à chaque image). */
+typedef struct { float shown, phase; uint64_t t; bool started; } ui_progress_t;
+bool ui_progress(canvas_t *c, rect_t r, ui_progress_t *p, int percent);
 void ui_icon_button(canvas_t *c, rect_t r, int icon, bool hover);
 void ui_toggle(canvas_t *c, rect_t r, bool on);
 void ui_slider(canvas_t *c, rect_t r, int value);         /* 0-100 */

@@ -20,6 +20,8 @@ static void squircle(canvas_t *c, float x, float y, float s, uint32_t top, uint3
     gfx_rrect_stroke(c, x, y, s, s, r, s > 40 ? 1.2f : 1.0f, 0x50FFFFFF);
 }
 
+void icon_squircle(canvas_t *c, float x, float y, float s, uint32_t top, uint32_t bottom) { squircle(c, x, y, s, top, bottom); }
+
 static void folder(canvas_t *c, float x, float y, float s, uint32_t back, uint32_t front_top, uint32_t front_bot) {
     gfx_rrect(c, x + s * 0.06f, y + s * 0.16f, s * 0.42f, s * 0.24f, s * 0.06f, OPAQUE(back));
     gfx_rrect_grad(c, x + s * 0.06f, y + s * 0.26f, s * 0.88f, s * 0.6f, s * 0.08f, OPAQUE(front_top), OPAQUE(front_bot));
@@ -37,6 +39,7 @@ static void paper(canvas_t *c, float x, float y, float s, uint32_t header) {
 
 void draw_icon(canvas_t *c, int icon, float x, float y, float s) {
     float cx = x + s / 2, cy = y + s / 2, t = s / 14 < 1.6f ? 1.6f : s / 14;
+    if (icon >= STORE_BASE && icon < STORE_BASE + STORE_MAX) { store_draw_icon(c, icon - STORE_BASE, x, y, s); return; }
     switch (icon) {
     case ICON_TERMINAL:
         squircle(c, x, y, s, 0x283447, 0x0B1220);
@@ -122,6 +125,15 @@ void draw_icon(canvas_t *c, int icon, float x, float y, float s) {
         gfx_rrect(c, x + s * 0.23f, y + s * 0.36f, s * 0.54f, s * 0.06f, s * 0.03f, 0xFFCBD5E1);
         gfx_ring(c, cx, y + s * 0.6f, s * 0.1f, t * 0.6f, 0xFF4338CA);
         gfx_line(c, cx - s * 0.1f, y + s * 0.6f, cx + s * 0.1f, y + s * 0.6f, t * 0.5f, 0xFF4338CA);
+        break;
+    }
+    case ICON_STORE: {           /* Logithèque : sac avec une flèche de téléchargement */
+        squircle(c, x, y, s, 0xFB923C, 0xDB2777);
+        gfx_arc(c, cx, y + s * 0.36f, s * 0.13f, t * 0.8f, 3.14159f, 6.28318f, 0xFFFFFFFF);          /* anse */
+        gfx_rrect(c, x + s * 0.24f, y + s * 0.34f, s * 0.52f, s * 0.44f, s * 0.08f, 0xF2FFFFFF);       /* sac */
+        gfx_line(c, cx, y + s * 0.44f, cx, y + s * 0.64f, t * 0.8f, 0xFFDB2777);
+        gfx_line(c, cx - s * 0.09f, y + s * 0.56f, cx, y + s * 0.65f, t * 0.8f, 0xFFDB2777);
+        gfx_line(c, cx + s * 0.09f, y + s * 0.56f, cx, y + s * 0.65f, t * 0.8f, 0xFFDB2777);
         break;
     }
     case ICON_UPDATE: {          /* flèche circulaire : mise à jour */

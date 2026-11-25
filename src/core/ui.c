@@ -318,3 +318,46 @@ void dlg_password(const char *title, const char *label, void (*cb)(const char *,
         strlcpy(d->ok, strstr(title, "Wi-Fi") ? "Se connecter" : "Valider", sizeof d->ok);
     }
 }
+
+/* ---------------- barre de progression fluide ---------------- */
+bool ui_progress(canvas_t *c, rect_t r, ui_progress_t *p, int percent) {
+    uint64_t now = plat_ms();
+    float dt = p->t ? (float)MIN(now - p->t, 100) : 16;
+    p->t = now;
+    float rad = r.h / 2.0f;
+    gfx_rrect(c, r.x, r.y, r.w, r.h, rad, 0x26FFFFFF);
+    uint32_t acc = accent();
+    uint32_t light = 0xFF000000u;
+    for (int sh = 0; sh < 24; sh += 8) {                      /* haut de la barre un peu plus clair */
+        uint32_t v = acc >> sh & 255;
+        light |= (v + (255 - v) / 4) << sh;
+    }
+    if (percent < 0) {                                        /* durée inconnue : un segment qui va et vient */
+        p->phase += dt / 1500.0f;
+        if (p->phase >= 1) p->phase -= 1;
+        float t = p->phase < 0.5f ? p->phase * 2 : 2 - p->phase * 2;
+        t = t * t * (3 - 2 * t);
+        float sw = r.w * 0.3f, x = r.x + (r.w - sw) * t;
+        gfx_rrect_grad(c, x, r.y, sw, r.h, rad, light, acc);
+        p->started = false;
+        return true;
+    }
+    float target = (float)CLAMP(percent, 0, 100);
+    if (!p->started || target < p->shown - 8) { p->shown = target > 3 ? target - 3 : 0; p->started = true; }   /* nouvelle tâche */
+    if (p->shown < target) p->shown += (target - p->shown) * (dt / (dt + 170.0f)) + dt * 0.002f;   /* glisse vers la valeur */
+    else if (target < 100 && p->shown < target + 2.5f) p->shown += dt * 0.0006f;                      /* avance doucement */
+    if (p->shown > 100) p->shown = 100;
+    float fw = MAX((float)r.h, r.w * p->shown / 100.0f);
+    gfx_rrect_grad(c, r.x, r.y, fw, r.h, rad, light, acc);
+    /* reflet lumineux qui parcourt la partie remplie */
+    p->phase += dt / 1700.0f;
+    if (p->phase >= 1) p->phase -= 1;
+    float bx = r.x - 40 + (fw + 80) * p->phase;
+    for (int i = -36; i <= 36; i += 2) {
+        float xx = bx + i;
+        if (xx < r.x + rad || xx + 2 > r.x + fw - rad) continue;
+        float a = 1 - (float)(i * i) / 1296.0f;
+        gfx_fill(c, R((int)xx, r.y, 2, r.h), (uint32_t)(a * 70) << 24 | 0xFFFFFF);
+    }
+    return true;
+}

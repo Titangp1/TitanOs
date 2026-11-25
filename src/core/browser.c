@@ -8,14 +8,11 @@ typedef struct {
     uint64_t next;
     int w, h;                    /* taille de l'écran X : celle de la fenêtre agrandie */
     int sent_w, sent_h;          /* dernière taille donnée à Chromium */
+    ui_progress_t prog;
+    uint64_t next_cur, next_manage;
 } br_t;
 
 static rect_t install_btn(canvas_t *c) { return R(c->w / 2 - 150, c->h / 2 + 40, 300, 42); }
-
-static void progress_bar(canvas_t *c, rect_t r, int pc) {
-    gfx_rrect(c, r.x, r.y, r.w, r.h, r.h / 2.0f, 0x30FFFFFF);
-    if (pc > 0) gfx_rrect(c, r.x, r.y, MAX((float)r.h, r.w * MIN(pc, 100) / 100.0f), r.h, r.h / 2.0f, accent());
-}
 
 static void br_draw(window_t *w, canvas_t *c) {
     br_t *b = w->data;
@@ -29,7 +26,7 @@ static void br_draw(window_t *w, canvas_t *c) {
         text_center(c, &font_body, R(0, c->h / 2 - 12, c->w, 22), "Démarrage du navigateur…", C_TEXT2);
     } else if (st == BR_INSTALLING) {
         text_center(c, &font_body, R(0, c->h / 2 - 12, c->w, 22), msg, C_TEXT2);
-        progress_bar(c, R(c->w / 2 - 220, c->h / 2 + 22, 440, 10), pc);
+        ui_progress(c, R(c->w / 2 - 220, c->h / 2 + 22, 440, 10), &b->prog, pc);
         text_center(c, &font_small, R(0, c->h / 2 + 46, c->w, 20), "Vous pouvez continuer à utiliser TitanOs pendant ce temps.", C_MUTED);
     } else {
         text_center(c, &font_body, R(0, c->h / 2 - 12, c->w, 22),
@@ -54,7 +51,14 @@ static void br_event(window_t *w, const event_t *e) {
         }
         return;
     }
-    if (e->type == EV_MOTION) plat_browser_input(6, 0, e->x, e->y);
+    if (e->type == EV_MOTION) {
+        plat_browser_input(6, 0, e->x, e->y);
+        uint64_t now = plat_ms();
+        if (now >= b->next_cur) {
+            b->next_cur = now + 50;
+            if (plat_xapp_cursor(BROWSER_XAPP, &w->cursor_img, &w->cursor_hx, &w->cursor_hy)) { w->cursor = CURSOR_APP; w->cursor_ver++; }
+        }
+    }
     else if (e->type == EV_BUTTON) plat_browser_input(e->down ? 4 : 5, e->button == BTN_RIGHT ? 3 : e->button == BTN_MIDDLE ? 2 : 1, e->x, e->y);
     else if (e->type == EV_WHEEL) {
         int btn = e->dy > 0 ? 5 : 4;
@@ -70,21 +74,27 @@ static void br_raw_key(window_t *w, int code, bool down) {
 
 static void br_tick(window_t *w, uint64_t now) {
     br_t *b = w->data;
-    if (now < b->next) return;
     if (!b->running) {
-        b->next = now + 300;
         int st = plat_browser_state(NULL, 0, NULL);
+        w->cursor = st == BR_READY ? CURSOR_BUSY : CURSOR_ARROW;          /* démarrage : pointeur « occupé » */
+        if (st == BR_INSTALLING) wm_invalidate(w);                        /* barre animée */
+        if (now < b->next) return;
+        b->next = now + 300;
         if (st == BR_READY && plat_browser_start(b->w, b->h)) {
-            if (plat_browser_frame(w->surf.px, w->surf.stride, w->surf.w, w->surf.h)) { b->running = true; w->dirty = false; }
+            if (plat_browser_frame(w->surf.px, w->surf.stride, w->surf.w, w->surf.h)) { b->running = true; w->dirty = false; w->cursor = CURSOR_ARROW; }
         }
         wm_invalidate(w);
         return;
     }
+    if (now < b->next) return;
     b->next = now + 33;                               /* environ 30 images par seconde */
     if (w->surf.w != b->sent_w || w->surf.h != b->sent_h) {   /* fenêtre agrandie ou redimensionnée */
         b->sent_w = w->surf.w;
         b->sent_h = w->surf.h;
         plat_browser_resize(b->sent_w, b->sent_h);
+    } else if (now >= b->next_manage) {                /* nouvelles fenêtres (dialogues) : placées */
+        b->next_manage = now + 500;
+        plat_xapp_manage(BROWSER_XAPP);
     }
     if (!plat_browser_running()) { b->running = false; plat_browser_stop(); wm_close(w); return; }
     if (plat_browser_frame(w->surf.px, w->surf.stride, w->surf.w, w->surf.h)) wm_damage_client(w);
@@ -92,6 +102,7 @@ static void br_tick(window_t *w, uint64_t now) {
 
 static void br_close(window_t *w) {
     plat_browser_stop();
+    canvas_free(&w->cursor_img);
     free(w->data);
 }
 

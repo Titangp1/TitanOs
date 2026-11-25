@@ -36,6 +36,32 @@ static int find_pcm(int *card_out, int *dev_out) {
     return -1;
 }
 
+/* Les applications Linux (Chromium, LibreOffice...) passent par la bibliothèque ALSA.
+ * Sans réglage, elle choisit la carte 0, qui peut être la sortie HDMI de la carte
+ * graphique : aucun son. On lui indique la bonne sortie, avec un mélangeur logiciel
+ * (dmix) pour que plusieurs applications puissent jouer en même temps. */
+static bool alsa_conf_done;
+static void alsa_conf_write(int card, int dev) {
+    if (alsa_conf_done) return;
+    alsa_conf_done = true;
+    char conf[640];
+    snprintf(conf, sizeof conf,
+             "# écrit par TitanOs : sortie son des applications\n"
+             "pcm.!default { type plug slave.pcm \"titanos\" }\n"
+             "pcm.titanos { type dmix ipc_key 5978 ipc_perm 0666\n"
+             "  slave { pcm \"hw:%d,%d\" rate 48000 channels 2 period_size 1024 buffer_size 8192 } }\n"
+             "ctl.!default { type hw card %d }\n", card, dev, card);
+    char old[640] = "";
+    if (read_file("/etc/asound.conf", old, sizeof old) > 0 && !strcmp(old, conf)) return;
+    write_file("/etc/asound.conf", conf);
+    klog("son : sortie des applications réglée sur la carte %d, sortie %d", card, dev);
+}
+
+void audio_alsa_conf(void) {
+    int c, d;
+    if (!alsa_conf_done && find_pcm(&c, &d) == 0) alsa_conf_write(c, d);
+}
+
 /* ---------------- paramètres matériels (comme tinyalsa) ---------------- */
 static struct snd_mask *pmask(struct snd_pcm_hw_params *p, int n) { return &p->masks[n - SNDRV_PCM_HW_PARAM_FIRST_MASK]; }
 static struct snd_interval *pint(struct snd_pcm_hw_params *p, int n) { return &p->intervals[n - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL]; }
@@ -70,6 +96,7 @@ static void hw_min(struct snd_pcm_hw_params *p, int n, unsigned v) { pint(p, n)-
 static int pcm_open(void) {
     int card, dev;
     if (find_pcm(&card, &dev) < 0) return -1;
+    alsa_conf_write(card, dev);
     char path[48];
     snprintf(path, sizeof path, "/dev/snd/pcmC%dD%dp", card, dev);
     int fd = sys_open(path, O_RDWR | O_CLOEXEC, 0);
