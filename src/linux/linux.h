@@ -8,7 +8,8 @@ bool module_load(const char *name);
 int  modules_coldplug(bool display_only);      /* nombre de pilotes chargés */
 int  uevent_open(void);
 void uevent_handle(int fd);
-void audio_alsa_conf(void);              /* /etc/asound.conf : bonne sortie son pour les applications */
+void audio_alsa_conf(void);
+bool module_reload(const char *name);       /* retire puis recharge un pilote */              /* /etc/asound.conf : bonne sortie son pour les applications */
 
 /* display.c : écran (DRM/KMS ou /dev/fb0) */
 bool display_open(void);
@@ -16,6 +17,7 @@ void display_close(void);
 void display_present(const uint32_t *scene, int stride, rect_t r);
 bool display_cursor_image(const uint32_t *px, int stride, int w, int h, int hx, int hy);   /* px NULL : caché */
 void display_cursor_move(int x, int y);
+bool display_gamma(float r, float g, float b);
 int  display_w(void);
 int  display_hz(void);
 bool display_flipped(void);               /* fréquence de l écran */

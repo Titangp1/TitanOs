@@ -307,6 +307,27 @@ void display_cursor_move(int x, int y) {
     sys_ioctl(D.fd, DRM_IOCTL_MODE_CURSOR, &c);
 }
 
+/* éclairage nocturne : la carte applique une table de couleurs (gamma) à toute l'image,
+ * sans aucun calcul pour le processeur. r, g, b : 1 = inchangé */
+bool display_gamma(float r, float g, float b) {
+    if (D.fd < 0 || !D.drm || !D.crtc || !strcmp(D.driver, "simpledrm")) return false;
+    struct drm_mode_crtc cr = { 0 };
+    cr.crtc_id = D.crtc;
+    if (sys_ioctl(D.fd, DRM_IOCTL_MODE_GETCRTC, &cr) < 0 || cr.gamma_size < 2 || cr.gamma_size > 4096) return false;
+    static uint16_t lut[3][4096];
+    int n = (int)cr.gamma_size;
+    float k[3] = { r, g, b };
+    for (int c = 0; c < 3; c++)
+        for (int i = 0; i < n; i++) lut[c][i] = (uint16_t)((float)i * 65535.0f / (float)(n - 1) * k[c]);
+    struct drm_mode_crtc_lut l = { 0 };
+    l.crtc_id = D.crtc;
+    l.gamma_size = (uint32_t)n;
+    l.red = (uint64_t)(uintptr_t)lut[0];
+    l.green = (uint64_t)(uintptr_t)lut[1];
+    l.blue = (uint64_t)(uintptr_t)lut[2];
+    return sys_ioctl(D.fd, DRM_IOCTL_MODE_SETGAMMA, &l) == 0;
+}
+
 void display_close(void) {
     if (D.fd < 0) return;
     cursor_free();

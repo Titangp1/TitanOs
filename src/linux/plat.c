@@ -32,6 +32,7 @@ bool plat_cursor_image(const canvas_t *img, int hx, int hy) {
     return img ? display_cursor_image(img->px, img->stride, img->w, img->h, hx, hy) : display_cursor_image(NULL, 0, 0, 0, 0, 0);
 }
 void plat_cursor_move(int x, int y) { display_cursor_move(x, y); }
+bool plat_night(float k) { return display_gamma(1.0f, 1.0f - 0.16f * k, 1.0f - 0.36f * k); }   /* environ 3400 K au plus chaud */
 void plat_log(const char *msg) { klog("%s", msg); }
 
 /* ---------------- emplacements ---------------- */

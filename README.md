@@ -2,10 +2,19 @@
 
 # TitanOs
 
+<p>
+<a href="https://github.com/Titangp1/TitanOs/releases/latest"><img src="https://img.shields.io/badge/T%C3%A9l%C3%A9charger-1d6fd1?style=flat-square&logo=github&logoColor=white" alt="Télécharger"></a>
+<img src="https://img.shields.io/badge/version-0.32.0--b%C3%AAta-1f2937?style=flat-square" alt="Version 0.32.0 bêta">
+<img src="https://img.shields.io/badge/licence-GPL--3.0-a77d2f?style=flat-square" alt="Licence GPL-3.0">
+<img src="https://img.shields.io/badge/base-Linux%206.18-4b5563?style=flat-square&logo=linux&logoColor=white" alt="Base Linux 6.18">
+<img src="https://img.shields.io/badge/PC-Sony%20VAIO%20F%20%C2%B7%20x86--64-6d28d9?style=flat-square" alt="Sony VAIO F, x86-64">
+<img src="https://img.shields.io/badge/d%C3%A9marrage-BIOS%20%2B%20UEFI-0f766e?style=flat-square" alt="BIOS et UEFI">
+</p>
+
 **Un système d'exploitation léger, sur base Linux, avec un bureau *liquid glass* écrit en C.**
 Pensé pour le Sony VAIO série F, il démarre sur n'importe quel PC 64 bits (BIOS ou UEFI).
 
-[**Télécharger la dernière version**](../../releases/latest) · [Historique des versions](CHANGELOG.md) · [Contribuer](CONTRIBUTING.md) · Licence GPL-3.0
+[**Télécharger la dernière version**](../../releases/latest) · [Historique des versions](CHANGELOG.md) · [Versionnage](#versions) · [Contribuer](CONTRIBUTING.md)
 
 ![Bureau de TitanOs](docs/captures/bureau.png)
 
@@ -65,6 +74,18 @@ Quelques programmes d'Alpine sont embarqués pour ce qui ne se réinvente pas :
 </tr>
 </table>
 
+## Nouveautés récentes
+
+| | |
+|---|---|
+| **Fenêtres** | Ancrage sur les moitiés de l'écran avec aperçu, vue d'ensemble animée de toutes les fenêtres. |
+| **Éclairage nocturne** | Couleurs plus chaudes le soir (Paramètres → Écran), appliquées par la carte graphique, sans coût pour le processeur. |
+| **Recherche** | Le menu Démarrer trouve les applications et les fichiers de l'utilisateur. |
+| **Paquets** | La Logithèque cherche et installe n'importe quel paquet Alpine ou application Flathub. Dans le Terminal, `apk add` demande sudo tout seul. |
+| **Réseau** | Console réseau en direct, connexion suivie jusqu'au résultat, Wi-Fi WPA3 et Entreprise. |
+
+Tout le détail est dans l'[historique des versions](CHANGELOG.md).
+
 ## Installer
 
 1. Téléchargez `titanos-betaN.img.zip` dans la [dernière version](../../releases/latest), puis décompressez-le.
@@ -105,6 +126,9 @@ Il faut 512 Mo de mémoire au minimum. Une fois TitanOs installé, les nouvelles
 | Ctrl+Alt+T | Ouvrir le Terminal |
 | Windows+L | Verrouiller la session |
 | Impr. écran | Capture d'écran, enregistrée dans *Images* |
+| F3, ou souris dans le coin en haut à gauche | Vue d'ensemble : toutes les fenêtres côte à côte |
+| Fenêtre lâchée contre un bord | Moitié gauche ou droite de l'écran ; contre le haut : plein écran |
+| Ctrl+C, Ctrl+X, Ctrl+V (Fichiers) | Copier, couper, coller des fichiers et des dossiers |
 
 Le bouton rond en bas à gauche propose : mettre en veille, redémarrer ou éteindre.
 
@@ -216,6 +240,25 @@ tools/                téléchargement Alpine, polices, initramfs, image disque,
 | les sons | `src/core/sound.c` (chaque son est une petite partition de notes) |
 | ajouter un pilote ou un programme d'Alpine | `MODULES` et `PACKAGES` dans `tools/buildos.py` |
 | les commandes du Terminal | `rootfs/etc/profile` |
+
+## Versions
+
+TitanOs suit un **numéro de version sémantique** `majeur.mineur.correctif`, complété du numéro de bêta :
+
+| Version | Tag Git | Nom affiché | Statut |
+|---|---|---|---|
+| **0.32.0** | `v0.32.0-beta.32` | TitanOs Bêta 32 | dernière version |
+
+- **majeur** (`0`) : reste à 0 tant que TitanOs est en bêta. La version 1.0.0 sera la première version stable.
+- **mineur** : augmente à chaque bêta publiée (bêta 32 → `0.32.0`).
+- **correctif** : pour une correction publiée sans nouvelle fonction (`0.32.1`...).
+
+Chaque version publiée contient trois fichiers :
+- `titanos-beta32.img.zip`, l'image à écrire sur une clé (Rufus, balenaEtcher, `dd`) ;
+- `titanos-maj.tar.gz`, la mise à jour par Internet ou par clé USB ;
+- `VERSION`, le numéro de bêta, lu par la recherche automatique des mises à jour.
+
+TitanOs installé se met à jour tout seul à partir de la dernière version publiée. L'historique complet est dans [CHANGELOG.md](CHANGELOG.md).
 
 ## Licence
 

@@ -241,3 +241,17 @@ void uevent_handle(int fd) {
             if (str_starts(buf + i, "MODALIAS=")) load_for_alias(buf + i + 9);
     }
 }
+
+/* retire un pilote puis le recharge (avec ses réglages) ; true si de nouveau chargé */
+bool module_reload(const char *name) {
+    char n[96];
+    strlcpy(n, name, sizeof n);
+    normalize(n);
+    long r = sc2(__NR_delete_module, (long)n, 0x800 /* O_NONBLOCK */);
+    for (int i = 0; i < 40 && loaded(n); i++) sleep_ms(25);
+    mod_t *m = find_mod(n);
+    if (m) m->tried = false;
+    bool ok = module_load(n);
+    klog("pilote %s rechargé (%s)", n, r == 0 && ok ? "ok" : "échec");
+    return ok;
+}

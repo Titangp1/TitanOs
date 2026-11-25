@@ -216,6 +216,7 @@ void settings_load(void) {
             else if (!strcmp(k, "accent")) g_set.accent = CLAMP(n, 0, ACCENT_COUNT - 1);
             else if (!strcmp(k, "utilisateur")) strlcpy(g_set.user, v, sizeof g_set.user);
             else if (!strcmp(k, "secondes")) g_set.seconds = n != 0;
+            else if (!strcmp(k, "nuit")) g_set.night = CLAMP(n, 0, 2);
             else if (!strcmp(k, "clavier")) g_set.layout = !strcmp(v, "us");
             else if (!strcmp(k, "fuseau")) g_set.tz = CLAMP(n, 0, tz_count - 1);
             else if (!strcmp(k, "horloge_locale")) g_set.rtc_local = n != 0;
@@ -388,9 +389,9 @@ bool settings_pass_check(const char *pw) {
 void settings_save(void) {
     static char buf[8192];
     int n = snprintf(buf, sizeof buf,
-                     "# Réglages de TitanOs\nfond=%d\naccent=%d\nutilisateur=%s\nsecondes=%d\nclavier=%s\n"
+                     "# Réglages de TitanOs\nfond=%d\naccent=%d\nutilisateur=%s\nsecondes=%d\nnuit=%d\nclavier=%s\n"
                      "fuseau=%d\nhorloge_locale=%d\nluminosite=%d\nverre=%d\nsons=%d\nvolume=%d\npointeur=%d\nmot_de_passe=%s\n",
-                     g_set.wallpaper, g_set.accent, g_set.user, g_set.seconds, g_set.layout ? "us" : "fr",
+                     g_set.wallpaper, g_set.accent, g_set.user, g_set.seconds, g_set.night, g_set.layout ? "us" : "fr",
                      g_set.tz, g_set.rtc_local, g_set.brightness, g_set.glass, g_set.sounds, g_set.volume, g_set.pointer, g_set.pass);
     n += snprintf(buf + n, sizeof buf - (size_t)n, "bureau=");
     for (int i = 0; i < g_set.ndesk; i++) {

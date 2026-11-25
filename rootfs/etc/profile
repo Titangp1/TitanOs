@@ -23,6 +23,14 @@ alias heure='date'
 alias eteindre='sudo poweroff -f'
 alias redemarrer='sudo reboot -f'
 
+# apk : les commandes qui modifient le système passent toutes seules par sudo
+apk() {
+    if [ "$(id -u)" != 0 ]; then
+        case "$1" in add|del|update|upgrade|fix|cache) sudo /sbin/apk "$@"; return $? ;; esac
+    fi
+    command apk "$@"
+}
+
 aide() {
     cat <<'FIN'
 Vous êtes « titan », sans droits d'administrateur. Pour une commande d'administration :
@@ -31,7 +39,7 @@ Vous êtes « titan », sans droits d'administrateur. Pour une commande d'admini
 Fichiers et dossiers : ls, cd, pwd, cat, cp, mv, rm, mkdir, tree, find, nano fichier.txt
 Système : htop, free -m, df -h, lsblk, lscpu, lspci, lsusb, findmnt, uptime, dmesg | tail
 Réseau : ip addr, ip route, ping 1.1.1.1, iw dev, curl URL
-Applications Linux : sudo apk add nom (par exemple : sudo apk add git)
+Applications Linux : apk add nom (sudo est demandé tout seul ; ou la recherche de la Logithèque)
 Alias en français : effacer, memoire, disques, reseau, heure, eteindre, redemarrer
 Vos fichiers : ~/Documents, ~/Images, ~/Musique, ~/Téléchargements, ~/Vidéos (sur la clé ou le disque)
 FIN
@@ -39,7 +47,7 @@ FIN
 
 if [ -t 1 ] && [ -z "$TITANOS_BIENVENUE" ]; then
     export TITANOS_BIENVENUE=1
-    printf '\033[1;35mTitanOs bêta 31\033[0m - noyau Linux %s - BusyBox\n' "$(uname -r)"
+    printf '\033[1;35mTitanOs bêta 32\033[0m - noyau Linux %s - BusyBox\n' "$(uname -r)"
     printf 'Tapez \033[1maide\033[0m pour la liste des commandes ; \033[1msudo\033[0m pour l'\''administration.\n\n'
 fi
 cd "$HOME" 2>/dev/null

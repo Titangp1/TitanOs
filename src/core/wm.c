@@ -551,6 +551,104 @@ static void set_rect(window_t *w, rect_t r) {
 static void toggle_max(window_t *w);
 void wm_maximize(window_t *w) { if (alive(w) && !w->maximized) toggle_max(w); }
 
+/* Ancrage : une fenêtre lâchée contre le bord gauche ou droit prend la moitié de l'écran,
+ * contre le haut tout l'écran. Un aperçu en verre montre la place avant de lâcher. */
+static int snap_zone;                       /* 0 aucun, 1 moitié gauche, 2 moitié droite, 3 plein écran */
+static rect_t snap_rect(int z) {
+    int top = 8, h = scr_h - DOCK_H - 30, half = (scr_w - 24) / 2;
+    if (z == 1) return R(8, top, half, h);
+    if (z == 2) return R(16 + half, top, scr_w - 24 - half, h);
+    return R(8, top, scr_w - 16, h);
+}
+static void apply_snap(window_t *w, int z) {
+    if (!(w->flags & WF_RESIZABLE)) return;
+    if (z == 3) { if (!w->maximized) { w->r = R(w->r.x, w->r.y, drag_start.w, drag_start.h); toggle_max(w); } return; }
+    w->anim_from = w->r;
+    if (!w->snapped) w->restore = R(w->r.x, w->r.y, drag_start.w, drag_start.h);
+    w->snapped = true;
+    set_rect(w, snap_rect(z));
+    w->anim = A_MAX;
+    w->anim_t0 = now;
+    sound_play(SFX_TICK);
+}
+
+/* Vue d'ensemble (coin en haut à gauche, ou F3) : toutes les fenêtres côte à côte, en
+ * petit ; un clic en choisit une. Elles glissent de leur place vers la grille et retour. */
+static shadow_t win_shadow[MAX_WIN];
+static bool ov_open;
+static uint64_t ov_t0;
+static int ov_n, ov_hover = -1;
+static window_t *ov_wins[MAX_WIN];
+static rect_t ov_cells[MAX_WIN];
+#define T_OV 260
+static void ov_layout(void) {
+    ov_n = 0;
+    for (int i = 0; i < zn; i++) {
+        window_t *w = &wins[zord[i]];
+        if (alive(w) && !w->minimized && !(w->flags & WF_DIALOG)) ov_wins[ov_n++] = w;
+    }
+    if (!ov_n) return;
+    int cols = 1;
+    while (cols * cols < ov_n) cols++;
+    int rows = (ov_n + cols - 1) / cols;
+    int ax = 60, ay = 70, aw = scr_w - 120, ah = scr_h - DOCK_H - 70 - 90;
+    int cw = aw / cols, ch = ah / rows;
+    for (int k = 0; k < ov_n; k++) {
+        rect_t r = ov_wins[k]->r;
+        float s = MIN((float)(cw - 40) / r.w, (float)(ch - 50) / r.h);
+        if (s > 1) s = 1;
+        int w = (int)(r.w * s), h = (int)(r.h * s), c = k % cols, rr = k / cols;
+        int rowcount = rr == rows - 1 ? ov_n - rr * cols : cols;          /* dernière ligne centrée */
+        int ox = ax + (aw - rowcount * cw) / 2;
+        ov_cells[k] = R(ox + c * cw + (cw - w) / 2, ay + rr * ch + (ch - 30 - h) / 2, w, h);
+    }
+}
+static float ov_p(void) {
+    float p = progress(ov_t0, T_OV);
+    return ease_in_out(ov_open ? p : 1 - p);
+}
+static bool ov_visible(void) { return ov_open || now - ov_t0 < T_OV; }
+static void ov_show(bool on) {
+    if (on == ov_open) return;
+    if (on) { ov_layout(); if (!ov_n) { wm_toast("Aucune fenêtre ouverte."); return; } }
+    float p = progress(ov_t0, T_OV);
+    ov_t0 = now - (uint64_t)((1 - p) * T_OV);           /* repart d'où l'animation en était */
+    ov_open = on;
+    ov_hover = -1;
+    damage_all();
+}
+static rect_t ov_rect(int k, float p) {
+    rect_t a = ov_wins[k]->r, b = ov_cells[k];
+    return R((int)(a.x + (b.x - a.x) * p), (int)(a.y + (b.y - a.y) * p), (int)(a.w + (b.w - a.w) * p), (int)(a.h + (b.h - a.h) * p));
+}
+static void draw_overview(void) {
+    float p = ov_p();
+    gfx_fill(T, R(0, 0, scr_w, scr_h), (uint32_t)(p * 0x90) << 24);
+    if (p > 0.5f) text_center(T, &font_title, R(0, 24, scr_w, 30), "Toutes les fenêtres", (uint32_t)((p - 0.5f) * 2 * 255) << 24 | 0xFFFFFF);
+    for (int k = 0; k < ov_n; k++) {
+        window_t *w = ov_wins[k];
+        if (!alive(w)) continue;
+        rect_t r = ov_rect(k, p);
+        draw_shadow(T, &win_shadow[w - wins], r, WIN_R * (1 - p * 0.4f), 28, 10, 0x70000000);
+        float sx = (float)r.w / w->r.w, sy = (float)r.h / w->r.h;
+        int th = (int)(TITLE_H * sy);
+        gfx_rrect(T, r.x, r.y, r.w, r.h, WIN_R * sx, 0xF01E1B4B);
+        gfx_rrect_grad(T, r.x, r.y, r.w, th + 2, WIN_R * sx, 0x60FFFFFF, 0x20FFFFFF);
+        rect_t c = wm_client(w);
+        gfx_blit_scaled(T, r.x + (c.x - w->r.x) * sx, r.y + (c.y - w->r.y) * sy, c.w * sx, c.h * sy, &w->surf, R(0, 0, w->surf.w, w->surf.h), 255);
+        if (ov_open && k == ov_hover) gfx_rrect_stroke(T, r.x - 3, r.y - 3, r.w + 6, r.h + 6, WIN_R * sx + 3, 3, accent());
+        if (p > 0.6f) {
+            int ts = (int)((p - 0.6f) / 0.4f * 255);
+            draw_icon(T, w->icon, r.x + r.w / 2 - 70, r.y + r.h + 10, 20);
+            text_fit(T, &font_body, r.x + r.w / 2 - 44, r.y + r.h + 12, 160, w->title, (uint32_t)ts << 24 | 0xFFFFFF);
+        }
+    }
+}
+static int ov_at(int x, int y) {
+    for (int k = ov_n - 1; k >= 0; k--) if (rect_has(rect_grow(ov_cells[k], 6), x, y)) return k;
+    return -1;
+}
+
 void wm_resize(window_t *w, int cw, int ch) {
     if (!alive(w) || w->maximized) return;
     rect_t r = w->r;
@@ -620,7 +718,9 @@ static void close_menu(void) {
     damage(rect_grow(dock_rect(), 20), 100);
 }
 
+static void fidx_build(void);
 static void open_menu(void) {
+    fidx_build();                                        /* recherche de fichiers prête */
     close_pop();
     if (cal_open) { cal_open = false; el_hide(&g_cal); }
     menu_open = true;
@@ -956,7 +1056,6 @@ static rect_t anim_area(window_t *w) {
 }
 
 static window_t *cur_win;
-static shadow_t win_shadow[MAX_WIN];
 static void draw_window_body(void) {
     window_t *w = cur_win;
     bool active = w == focused;
@@ -1108,6 +1207,40 @@ static void draw_tray(void) {
 
 /* menu TitanOs : recherche et grille d'applications */
 static int menu_apps[APP_COUNT + STORE_MAX], menu_napps;
+
+/* Recherche de fichiers (comme Spotlight) : les noms des fichiers et dossiers de
+ * l'utilisateur, relus au plus toutes les 30 s, jusqu'à 4 niveaux de dossiers */
+typedef struct { char path[300]; char name[100]; bool dir; } fidx_t;
+static fidx_t *fidx;
+static int nfidx, fres[6], nfres;
+static uint64_t fidx_t0;
+static void fidx_walk(const char *dir, int depth) {
+    if (depth > 4 || nfidx >= 3000) return;
+    dirent_t *l;
+    int n = plat_listdir(dir, &l);
+    for (int i = 0; i < n && nfidx < 3000; i++) {
+        if (l[i].name[0] == '.') continue;
+        fidx_t *f = &fidx[nfidx++];
+        snprintf(f->path, sizeof f->path, "%s/%s", dir, l[i].name);
+        strlcpy(f->name, l[i].name, sizeof f->name);
+        f->dir = l[i].dir;
+        if (l[i].dir) fidx_walk(f->path, depth + 1);
+    }
+    if (n > 0) free(l);
+}
+static void fidx_build(void) {
+    if (fidx && now - fidx_t0 < 30000) return;
+    if (!fidx) fidx = malloc(sizeof *fidx * 3000);
+    if (!fidx) return;
+    nfidx = 0;
+    fidx_walk(plat_home(), 0);
+    fidx_t0 = now;
+}
+static void file_filter(void) {
+    nfres = 0;
+    if (!menu_search.s[0] || !fidx) return;
+    for (int i = 0; i < nfidx && nfres < countof(fres); i++) if (str_icontains(fidx[i].name, menu_search.s)) fres[nfres++] = i;
+}
 static void menu_filter(void) {
     menu_napps = 0;
     for (int i = 0; i < APP_COUNT; i++)
@@ -1115,6 +1248,11 @@ static void menu_filter(void) {
     for (int k = 0; k < store_count() && k < STORE_MAX; k++)        /* applications de la Logithèque */
         if (store_installed(k) && str_icontains(store_name(k), menu_search.s)) menu_apps[menu_napps++] = STORE_BASE + k;
     if (menu_sel >= menu_napps) menu_sel = MAX(0, menu_napps - 1);
+}
+static rect_t menu_file_rect(int k) {
+    rect_t m = menu_rect();
+    int rows = menu_napps ? (menu_napps + MENU_COLS - 1) / MENU_COLS : 0;
+    return R(m.x + 24, m.y + 136 + rows * 112 + (rows ? 30 : 4) + k * 36, m.w - 48, 34);
 }
 static rect_t menu_app_rect(int k) {
     rect_t m = menu_rect();
@@ -1136,7 +1274,7 @@ static void user_initial(char *out) {
 static void draw_menu(void) {
     rect_t m = menu_rect();
     draw_glass_ex(&g_menu, m, 28, 2, 40, 0x70000000);
-    ui_field(T, R(m.x + 24, m.y + 24, m.w - 48, 44), &menu_search, "Rechercher une application");
+    ui_field(T, R(m.x + 24, m.y + 24, m.w - 48, 44), &menu_search, "Rechercher une application ou un fichier");
     text_draw(T, &font_bold, m.x + 28, m.y + 96, menu_search.s[0] ? "Résultats" : "Applications", C_TEXT2);
     menu_filter();
     for (int k = 0; k < menu_napps; k++) {
@@ -1147,7 +1285,18 @@ static void draw_menu(void) {
         const char *n = app_name(menu_apps[k]);
         text_draw(T, &font_body, r.x + (r.w - text_width(&font_body, n)) / 2, r.y + 74, n, C_TEXT);
     }
-    if (!menu_napps) text_draw(T, &font_body, m.x + 28, m.y + 140, "Aucune application ne correspond.", C_MUTED);
+    file_filter();
+    if (!menu_napps && !nfres) text_draw(T, &font_body, m.x + 28, m.y + 140, "Aucune application ni aucun fichier ne correspond.", C_MUTED);
+    for (int k = 0; k < nfres; k++) {                       /* fichiers trouvés */
+        rect_t r = menu_file_rect(k);
+        if (!k) text_draw(T, &font_bold, r.x + 4, r.y - 26, "Fichiers", C_TEXT2);
+        if (menu_hover == 200 + k || (!menu_napps && k == 0 && menu_sel == 0)) gfx_rrect(T, r.x, r.y, r.w, r.h, 10, 0x26FFFFFF);
+        const fidx_t *f = &fidx[fres[k]];
+        draw_icon(T, f->dir ? ICON_FOLDER : ICON_FILE, r.x + 8, r.y + 5, 24);
+        text_fit(T, &font_body, r.x + 42, r.y + 9, r.w / 2 - 50, f->name, C_TEXT);
+        const char *rel = f->path + strlen(plat_home());
+        text_fit(T, &font_small, r.x + r.w / 2, r.y + 11, r.w / 2 - 10, rel[0] ? rel : "/", C_MUTED);
+    }
     gfx_fill(T, R(m.x + 20, m.y + m.h - 84, m.w - 40, 1), C_LINE);
     gfx_circle(T, m.x + 44, m.y + m.h - 44, 20, accent());
     char ini[8];
@@ -1394,9 +1543,15 @@ static void compose(void) {
     else if (mode == MODE_LOCK) draw_lock();
     else {
         draw_desktop();
-        for (int i = 0; i < zn; i++) {
+        if (ov_visible()) draw_overview();
+        else for (int i = 0; i < zn; i++) {
             window_t *w = &wins[zord[i]];
             if (!w->minimized && rect_hits(win_outer(w), D)) draw_window(w);
+        }
+        if (snap_zone && drag_kind == DR_MOVE) {            /* aperçu de l'ancrage */
+            rect_t s = snap_rect(snap_zone);
+            gfx_rrect(T, s.x, s.y, s.w, s.h, WIN_R, (accent() & 0xFFFFFF) | 0x30000000);
+            gfx_rrect_stroke(T, s.x, s.y, s.w, s.h, WIN_R, 2, 0x90FFFFFF);
         }
         with_layer(rect_grow(dock_rect(), 40), 1, 0, draw_dock_body);
         draw_tray();
@@ -1716,6 +1871,7 @@ static void update_hover(void) {
         int mh = -1;
         for (int k = 0; k < menu_napps; k++) if (rect_has(menu_app_rect(k), mx, my)) mh = k;
         for (int i = 0; i < 3; i++) if (rect_has(menu_power_rect(i), mx, my)) mh = 100 + i;
+        for (int k = 0; k < nfres; k++) if (rect_has(menu_file_rect(k), mx, my) && menu_file_rect(k).y + 34 < menu_rect().y + menu_rect().h - 90) mh = 200 + k;
         if (mh != menu_hover) { menu_hover = mh; damage(menu_rect(), 101); }
     }
     if (pop_open) {
@@ -1892,8 +2048,20 @@ static void mouse_button(const event_t *e) {
             desk_drag = -1;
             desk_dragging = false;
         }
+        if (drag_kind == DR_MOVE && snap_zone && alive(drag_win)) {
+            damage(rect_grow(snap_rect(snap_zone), 8), 0);
+            apply_snap(drag_win, snap_zone);
+        }
+        snap_zone = 0;
         if (drag_kind) { drag_kind = DR_NONE; drag_win = NULL; }
         if (capture) { window_t *c = capture; capture = NULL; dispatch_client(c, e); }
+        return;
+    }
+    if (ov_open) {                                       /* vue d'ensemble : une fenêtre choisie, ou retour */
+        int k = ov_at(mx, my);
+        window_t *w = k >= 0 ? ov_wins[k] : NULL;
+        ov_show(false);
+        if (w && alive(w)) { wm_focus(w); sound_play(SFX_CLICK); }
         return;
     }
     if (pop_open) {
@@ -1912,6 +2080,12 @@ static void mouse_button(const event_t *e) {
                 wm_menu(mx, my, items, 2, menu_app_cb, NULL);
             }
             else if (menu_hover >= 0 && menu_hover < 100) { int a = menu_apps[menu_hover]; close_menu(); app_open(a); }
+            else if (menu_hover >= 200 && menu_hover < 200 + nfres) {
+                char p[300];
+                strlcpy(p, fidx[fres[menu_hover - 200]].path, sizeof p);
+                close_menu();
+                open_path(p);
+            }
             else if (menu_hover == 100) { close_menu(); wm_lock(); }
             else if (menu_hover >= 101) { close_menu(); sound_play(SFX_CLICK); wm_power(menu_hover == 101); }
             return;
@@ -1980,12 +2154,13 @@ static void mouse_button(const event_t *e) {
         if (my < w->r.y + TITLE_H) {
             if (e->button == BTN_LEFT && dbl) { toggle_max(w); return; }
             if (e->button == BTN_LEFT) {
-                if (w->maximized) {
+                if (w->maximized || w->snapped) {
                     int rw = w->restore.w;
-                    w->maximized = false;
+                    w->maximized = w->snapped = false;
                     set_rect(w, R(mx - rw / 2, w->r.y, rw, w->restore.h));
                 }
-                drag_kind = DR_MOVE; drag_win = w; drag_dx = mx - w->r.x; drag_dy = my - w->r.y;
+                drag_kind = DR_MOVE; drag_win = w; drag_start = w->r; drag_dx = mx - w->r.x; drag_dy = my - w->r.y;
+                snap_zone = 0;
             }
             return;
         }
@@ -2016,6 +2191,12 @@ static void motion(void) {
         }
     }
     if (drag_kind == DR_MOVE && alive(drag_win)) {
+        int z = !(drag_win->flags & WF_RESIZABLE) ? 0 : mx <= 3 ? 1 : mx >= scr_w - 4 ? 2 : my <= 3 ? 3 : 0;
+        if (z != snap_zone) {
+            if (snap_zone) damage(rect_grow(snap_rect(snap_zone), 8), 0);
+            snap_zone = z;
+            if (z) { damage(rect_grow(snap_rect(z), 8), 0); sound_play(SFX_TICK); }
+        }
         int nx = mx - drag_dx, ny = CLAMP(my - drag_dy, 0, scr_h - 60);
         bool had = drag_win->glass_ok;
         set_rect(drag_win, R(nx, ny, drag_win->r.w, drag_win->r.h));
@@ -2051,6 +2232,7 @@ static void menu_key(const event_t *e) {
     if (e->key == K_ENTER) {
         menu_filter();
         if (menu_napps) { int a = menu_apps[menu_sel]; close_menu(); app_open(a); }
+        else { file_filter(); if (nfres) { char p[300]; strlcpy(p, fidx[fres[0]].path, sizeof p); close_menu(); open_path(p); } }
         return;
     }
     int cols = MENU_COLS;
@@ -2105,7 +2287,9 @@ void core_event(const event_t *e) {
         }
         if (pop_open && e->key == K_ESC) { close_pop(); return; }
         if (menu_open) { menu_key(e); return; }
-        if (e->key == K_SUPER) { open_menu(); return; }
+        if (ov_open && (e->key == K_ESC || e->key == K_F3)) { ov_show(false); return; }
+        if (e->key == K_F3) { ov_show(true); return; }
+        if (e->key == K_SUPER) { if (ov_open) ov_show(false); open_menu(); return; }
         if ((e->mods & MOD_ALT) && e->key == K_TAB) { cycle_windows(); return; }
         if ((e->mods & MOD_ALT) && e->key == K_F4) { if (alive(focused)) wm_request_close(focused); return; }
         if (e->key == K_PRINT) { screenshot(); return; }
@@ -2128,6 +2312,19 @@ void core_event(const event_t *e) {
         my = CLAMP(my, 0, scr_h - 1);
         if (cur_hw) plat_cursor_move(mx, my);
         else cursor_moved = true;
+        if (mode == MODE_DESK) {
+            /* coin actif en haut à gauche : vue d'ensemble (une fois par passage) */
+            static bool in_corner;
+            bool corner = mx <= 1 && my <= 1 && !drag_kind && !menu_open;
+            if (corner && !in_corner) ov_show(!ov_open);
+            in_corner = corner;
+            if (ov_open) {
+                int h = ov_at(mx, my);
+                if (h != ov_hover) { ov_hover = h; damage_all(); }
+                cursor_update();
+                return;
+            }
+        }
         if (mode == MODE_DESK) motion();
         cursor_update();
         return;
@@ -2270,6 +2467,13 @@ static void poll_hardware(void) {
     bool wired = false;
     for (int i = 0; i < n; i++)
         if (strcmp(ifs[i].name, "lo") && strcmp(ifs[i].kind, "Wi-Fi") && ifs[i].carrier && ifs[i].ip[0]) wired = true;
+    /* éclairage nocturne : la teinte change en douceur (environ 30 s) */
+    static float night_cur = -1, night_applied = -1;
+    float night_target = g_set.night == 1 || (g_set.night == 2 && (now_dt.hour >= 20 || now_dt.hour < 7)) ? 1.0f : 0.0f;
+    if (night_cur < 0) night_cur = 0;
+    if (night_cur < night_target) night_cur = MIN(night_target, night_cur + 0.08f);
+    else if (night_cur > night_target) night_cur = MAX(night_target, night_cur - 0.08f);
+    if (night_cur != night_applied || night_cur > 0) { plat_night(night_cur); night_applied = night_cur; }   /* (réappliqué : l'écran peut changer) */
     bool changed = memcmp(&b, &bat, sizeof b) || ws != wifi_state || (sig / 25) != (wifi_signal / 25) ||
                    wired != net_wired || strcmp(ssid, wifi_ssid);
     if (b.present != bat.present) damage(rect_grow(tray_rect(), 30), 0);
@@ -2356,6 +2560,7 @@ int core_frame(void) {
     }
     if (dock_moving) { damage(rect_grow(dock_rect(), 20), 100); anim = true; }
     if (trans) { damage_all(); anim = true; }
+    if (now - ov_t0 < T_OV + 20) { damage_all(); anim = true; }
     int wait = anim ? 16 : 500;
     if (glass_stale) wait = MIN(wait, 130);
     for (int i = 0; i < MAX_WIN; i++) {

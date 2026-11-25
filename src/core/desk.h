@@ -45,6 +45,7 @@ typedef struct {
     int  wallpaper, accent;
     char user[32];
     bool seconds;
+    int  night;                      /* éclairage nocturne : 0 non, 1 toujours, 2 le soir (20 h - 7 h) */
     int  layout;          /* 0 AZERTY, 1 QWERTY */
     int  tz;              /* fuseau horaire (index de tz_list) */
     bool rtc_local;       /* horloge du PC réglée en heure locale (comme Windows) */
@@ -85,6 +86,7 @@ enum { WF_RESIZABLE = 1, WF_DIALOG = 2, WF_SINGLE = 4 };
 typedef struct window window_t;
 struct window {
     bool     used, minimized, maximized, dirty, glass_ok, closing;
+    bool     snapped;               /* ancrée sur une moitié de l'écran */
     int      anim;                  /* animation en cours : ouverture, fermeture, réduction */
     uint64_t anim_t0;
     unsigned flags;

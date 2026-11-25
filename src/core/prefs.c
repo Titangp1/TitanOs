@@ -32,7 +32,7 @@ typedef struct {
 enum {   /* zones cliquables */
     H_NONE = 0, H_SIDE0 = 1, H_WALL0 = 20, H_ACC0 = 40, H_GLASS0 = 50, H_BRIGHT = 60, H_VOL, H_SOUNDS,
     H_LAYOUT0 = 70, H_PTR = 80, H_NETOPEN, H_TZ_PREV, H_TZ_NEXT, H_NTP, H_SECONDS, H_RTC, H_NAME, H_PASS,
-    H_PASS_DEL, H_UPDATES, H_ABOUT,
+    H_PASS_DEL, H_UPDATES, H_ABOUT, H_NIGHT0 = 120,
 };
 
 #define WIN_W   980
@@ -110,7 +110,9 @@ static void draw_screen(prefs_t *p, canvas_t *c) {
     row(c, 1, "Affichage", si.display);
     row(c, 2, "Carte graphique", si.gpu);
     text_fit(c, &font_small, row_rect(c, 2).x + row_rect(c, 2).w - 330, row_rect(c, 2).y + 21, 316, si.gpu_driver, C_TEXT2);
-    (void)p;
+    row(c, 3, "Éclairage nocturne", "Couleurs plus chaudes : moins de lumière bleue le soir");
+    static const char *nl[3] = { "Non", "Toujours", "Le soir" };
+    ui_segments(c, row_ctrl(c, 3, 300, 36), nl, 3, g_set.night, p->hover >= H_NIGHT0 && p->hover < H_NIGHT0 + 3 ? p->hover - H_NIGHT0 : -1);
 }
 
 static void draw_sound(prefs_t *p, canvas_t *c) {
@@ -225,7 +227,12 @@ static int hit(prefs_t *p, canvas_t *c, int x, int y) {
         if (g >= 0) return H_GLASS0 + g;
         break;
     }
-    case P_SCREEN: if (rect_has(row_ctrl(c, 0, 300, 40), x, y)) return H_BRIGHT; break;
+    case P_SCREEN: {
+        if (rect_has(row_ctrl(c, 0, 300, 40), x, y)) return H_BRIGHT;
+        int n = ui_segment_at(row_ctrl(c, 3, 300, 36), 3, x, y);
+        if (n >= 0) return H_NIGHT0 + n;
+        break;
+    }
     case P_SOUND:
         if (rect_has(row_ctrl(c, 0, 300, 40), x, y)) return H_VOL;
         if (rect_has(row_ctrl(c, 1, 52, 30), x, y)) return H_SOUNDS;
@@ -326,6 +333,7 @@ static void prefs_event(window_t *w, const event_t *e) {
         else if (h == H_TZ_PREV) { g_set.tz = (g_set.tz + tz_count - 1) % tz_count; g_set.rtc_local = false; }
         else if (h == H_TZ_NEXT) { g_set.tz = (g_set.tz + 1) % tz_count; g_set.rtc_local = false; }
         else if (h == H_SECONDS) g_set.seconds = !g_set.seconds;
+        else if (h >= H_NIGHT0 && h < H_NIGHT0 + 3) g_set.night = h - H_NIGHT0;
         else if (h == H_RTC) g_set.rtc_local = !g_set.rtc_local;
         else if (h == H_NTP && p->ntp_job < 0) {
             static const char *const argv[] = { "/bin/busybox", "ntpd", "-n", "-q", "-p", "pool.ntp.org", NULL };

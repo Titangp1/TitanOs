@@ -2,6 +2,22 @@
 
 Toutes les versions sont dans les [versions publiées](../../releases). Depuis la bêta 6, TitanOs se met à jour tout seul.
 
+## Bêta 32 (0.32.0)
+
+Version **0.32.0** (bêta 32). À partir de celle-ci, les versions suivent un numéro sémantique `0.bêta.correctif` (voir la section « Versions » du README).
+
+**Fenêtres**
+- **Ancrage** : une fenêtre lâchée contre le bord gauche ou droit prend la moitié de l'écran ; contre le haut, tout l'écran. Un aperçu en verre montre la place avant de lâcher, et la fenêtre glisse en douceur. Reprise à la souris, elle retrouve sa taille.
+- **Vue d'ensemble** : souris dans le coin en haut à gauche, ou touche F3. Toutes les fenêtres glissent vers une grille, avec leur nom ; un clic en choisit une, Échap revient.
+
+**Nouvelles fonctions**
+- **Éclairage nocturne** (Paramètres → Écran) : Non, Toujours, ou Le soir (20 h à 7 h). Les couleurs deviennent plus chaudes (environ 3 400 K) en une trentaine de secondes. La carte graphique applique la teinte elle-même : rien à calculer pour le processeur.
+- **Recherche de fichiers** dans le menu Démarrer : en plus des applications, les fichiers et dossiers de l'utilisateur (jusqu'à 4 niveaux), avec leur emplacement. Clic ou Entrée pour ouvrir.
+
+**Paquets**
+- **Recherche dans la Logithèque** : un mot, Entrée, et la Logithèque cherche dans les paquets d'Alpine et sur Flathub. « Installer » en un clic, avec une barre de progression. Les applications Flathub rejoignent le menu Démarrer avec leur icône. Les paquets Alpine s'utilisent dans le Terminal.
+- **Terminal** : `apk add`, `apk del`, `apk upgrade` passent tout seuls par sudo.
+
 ## Bêta 31
 
 **Fichiers : copier, couper, coller**

@@ -25,8 +25,8 @@ typedef __builtin_va_list va_list;
 #define false 0
 #define NULL  ((void *)0)
 
-#define TITANOS_VERSION "Bêta 31"
-#define TITANOS_BUILD   31             /* numéro de version, comparé aux mises à jour publiées */
+#define TITANOS_VERSION "Bêta 32"
+#define TITANOS_BUILD   32             /* numéro de version, comparé aux mises à jour publiées */
 #define countof(a) ((int)(sizeof(a) / sizeof((a)[0])))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -183,6 +183,7 @@ void  plat_xapp_stop(int x);
 #define BROWSER_XAPP 0                                      /* le navigateur : poignée 0 */
 /* pointeur matériel (plan « curseur » de la carte graphique) */
 void  plat_cursor_move(int x, int y);
+bool  plat_night(float k);                                  /* éclairage nocturne : 0 neutre, 1 le plus chaud */
 int   plat_brightness(int set);                             /* set<0 : lecture ; 0-100 ou -1 */
 void  plat_sync(void);
 

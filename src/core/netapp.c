@@ -578,6 +578,9 @@ static void con_event(window_t *w, const event_t *e) {
             " wpa_cli -p /run/wpa_supplicant -i $i status | grep -vE 'passphrase|psk'; wpa_cli -p /run/wpa_supplicant -i $i list_networks; done;"
             " for w in /sys/class/net/*/wireless; do [ -e \"$w\" ] || continue; d=${w%/wireless}; d=${d##*/}; echo \"== liaison $d\";"
             " iw dev $d link; iw dev $d station dump | grep -E 'signal|bitrate'; done;"
+            " for n in /sys/class/net/*; do [ -e \"$n/device\" ] && [ ! -e \"$n/wireless\" ] || continue; d=${n##*/};"
+            " echo \"== câble $d\"; ethtool $d 2>&1 | grep -E 'Speed|Duplex|Auto-neg|Link detected|Advertised link'; ip -s link show $d | tail -n 4;"
+            " grep -E \"$d|sky2\" /proc/interrupts; done;"
             " echo '== pays'; iw reg get | head -n 4; echo '== test'; ping -c 2 -W 3 1.1.1.1 | tail -n 2;"
             " nslookup github.com 2>&1 | tail -n 2; } 2>&1 | while IFS= read -r l; do echo \"<6>titanos: diag : $l\" > /dev/kmsg; done";
         const char *argv[] = { "/bin/busybox", "sh", "-c", script, NULL };
